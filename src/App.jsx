@@ -1,0 +1,746 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App.jsx";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #000;
+}
+
+import React, { useState, useEffect, useRef } from "react";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
+
+const UNIT_LABELS = { minuter: "minuter", timmar: "timmar" };
+const UNIT_TO_TRADING_DAYS = { minuter: 1 / 390, timmar: 1 / 6.5 };
+const HORIZON_PRESETS = [
+  { label: "15 MIN", amount: 15, unit: "minuter" },
+  { label: "30 MIN", amount: 30, unit: "minuter" },
+  { label: "1H", amount: 1, unit: "timmar" },
+  { label: "4H", amount: 4, unit: "timmar" },
+  { label: "HELA DAGEN", amount: 6.5, unit: "timmar" },
+];
+
+export default function SannolikhetsTerminal() {
+  const [price, setPrice] = useState(100);
+  const [vol, setVol] = useState(35);
+  const [drift, setDrift] = useState(5);
+  const [horizonAmount, setHorizonAmount] = useState(30);
+  const [horizonUnit, setHorizonUnit] = useState("minuter");
+  const [momentum, setMomentum] = useState("neutral");
+  const [thesis, setThesis] = useState("bull");
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState(null);
+  const [clock, setClock] = useState(new Date());
+  const rafRef = useRef(null);
+
+  // Image analysis state
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageBase64, setImageBase64] = useState(null);
+  const [imageMediaType, setImageMediaType] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Nyhetsanalys per aktie
+  const [ticker, setTicker] = useState("");
+  const [newsAnalyzing, setNewsAnalyzing] = useState(false);
+  const [newsAnalysis, setNewsAnalysis] = useState(null);
+  const [newsError, setNewsError] = useState(null);
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const momentumScore = { bullish: 66, neutral: 50, bearish: 34 }[momentum];
+  const momentumLabel = { bullish: "BULLISH", neutral: "NEUTRAL", bearish: "BEARISH" }[momentum];
+
+  function randNormal() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  function handleImageSelect(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setAiAnalysis(null);
+    setAiError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = reader.result;
+      const base64 = res.split(",")[1];
+      setImagePreview(res);
+      setImageBase64(base64);
+      setImageMediaType(file.type || "image/png");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function analyzeImage() {
+    setAiError("AI-bildanalys är tillfälligt avstängd i GitHub Pages-versionen. Den kopplas senare via en säker backend så att ingen API-nyckel exponeras.");
+  }
+
+  function clearImage() {
+    setImagePreview(null);
+    setImageBase64(null);
+    setImageMediaType(null);
+    setAiAnalysis(null);
+    setAiError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function analyzeNews() {
+    setNewsError("AI-nyhetsanalys är tillfälligt avstängd i GitHub Pages-versionen. Den kopplas senare via en säker backend så att ingen API-nyckel exponeras.");
+  }
+
+  function clearNews() {
+    setNewsAnalysis(null);
+    setNewsError(null);
+  }
+
+  function runSimulation() {
+    setRunning(true);
+    setResult(null);
+    setProgress(0);
+
+    const NSIM = 2500;
+    const tradingDays = horizonAmount * UNIT_TO_TRADING_DAYS[horizonUnit];
+    const T = tradingDays / 252; // horisont uttryckt i handelsår
+    const muAnnual = drift / 100;
+    const sigmaAnnual = vol / 100;
+    const finals = [];
+    let above = 0;
+    let bigUp = 0;
+    let bigDown = 0;
+
+    // Terminalfördelningen för geometrisk brownsk rörelse behöver bara ett steg
+    // till horisonten T (matematiskt likvärdigt med att stega dag för dag) -
+    // detta gör att korta horisonter ner till minuter hanteras korrekt.
+    for (let i = 0; i < NSIM; i++) {
+      const z = randNormal();
+      const p = price * Math.exp((muAnnual - 0.5 * sigmaAnnual * sigmaAnnual) * T + sigmaAnnual * Math.sqrt(T) * z);
+      finals.push(p);
+      if (p > price) above++;
+      if (p > price * 1.05) bigUp++;
+      if (p < price * 0.95) bigDown++;
+    }
+
+    const mcProb = (above / NSIM) * 100;
+    const hasAi = aiAnalysis && typeof aiAnalysis.confidence === "number";
+    const aiScore = hasAi ? aiAnalysis.confidence : null;
+    const hasNews =
+      newsAnalysis &&
+      typeof newsAnalysis.confidence === "number" &&
+      (newsAnalysis.direction === "upp" || newsAnalysis.direction === "ner");
+    const newsScore = hasNews ? (newsAnalysis.direction === "upp" ? newsAnalysis.confidence : 100 - newsAnalysis.confidence) : null;
+
+    let baseEnsemble;
+    let weights;
+    if (hasAi && hasNews) {
+      baseEnsemble = mcProb * 0.3 + momentumScore * 0.1 + aiScore * 0.3 + newsScore * 0.3;
+      weights = { mc: 30, momentum: 10, ai: 30, news: 30, amd: 0 };
+    } else if (hasAi) {
+      baseEnsemble = mcProb * 0.4 + momentumScore * 0.15 + aiScore * 0.45;
+      weights = { mc: 40, momentum: 15, ai: 45, news: 0, amd: 0 };
+    } else if (hasNews) {
+      baseEnsemble = mcProb * 0.4 + momentumScore * 0.15 + newsScore * 0.45;
+      weights = { mc: 40, momentum: 15, ai: 0, news: 45, amd: 0 };
+    } else {
+      baseEnsemble = mcProb * 0.7 + momentumScore * 0.3;
+      weights = { mc: 70, momentum: 30, ai: 0, news: 0, amd: 0 };
+    }
+
+    // AMD (Accumulation/Manipulation/Distribution) is only ever used as a
+    // confirming backup signal: skipped if unclear, skipped if it disagrees
+    // with the direction the other methods already point to, and only
+    // blended in when it agrees with that direction.
+    let ensemble = baseEnsemble;
+    let amdStatus = "none"; // "none" | "unclear" | "confirmed" | "contradicted"
+    const hasAmd =
+      hasAi && aiAnalysis.amd_phase && aiAnalysis.amd_phase !== "unclear" && typeof aiAnalysis.amd_confidence === "number";
+
+    if (hasAi && (!aiAnalysis.amd_phase || aiAnalysis.amd_phase === "unclear")) {
+      amdStatus = "unclear";
+    } else if (hasAmd) {
+      const baseLeansUp = baseEnsemble > 50;
+      const baseLeansDown = baseEnsemble < 50;
+      const amdLeansUp = aiAnalysis.amd_confidence > 50;
+      const amdLeansDown = aiAnalysis.amd_confidence < 50;
+      const agrees = (baseLeansUp && amdLeansUp) || (baseLeansDown && amdLeansDown);
+      if (baseEnsemble === 50) {
+        amdStatus = "unclear"; // no clear base direction to confirm against
+      } else if (agrees) {
+        const amdWeight = 0.2;
+        ensemble = baseEnsemble * (1 - amdWeight) + aiAnalysis.amd_confidence * amdWeight;
+        weights = {
+          mc: Math.round(weights.mc * (1 - amdWeight)),
+          momentum: Math.round(weights.momentum * (1 - amdWeight)),
+          ai: Math.round(weights.ai * (1 - amdWeight)),
+          news: Math.round(weights.news * (1 - amdWeight)),
+          amd: 20,
+        };
+        amdStatus = "confirmed";
+      } else {
+        amdStatus = "contradicted";
+      }
+    }
+
+    const min = Math.min(...finals);
+    const max = Math.max(...finals);
+    const bucketCount = 22;
+    const bucketSize = (max - min) / bucketCount || 1;
+    const buckets = new Array(bucketCount).fill(0);
+    finals.forEach((f) => {
+      let idx = Math.floor((f - min) / bucketSize);
+      if (idx >= bucketCount) idx = bucketCount - 1;
+      if (idx < 0) idx = 0;
+      buckets[idx]++;
+    });
+    const histogram = buckets.map((count, i) => ({
+      x: min + i * bucketSize,
+      count,
+      isUp: min + i * bucketSize >= price,
+    }));
+
+    let p = 0;
+    const step = () => {
+      p += 6 + Math.random() * 10;
+      if (p >= 100) {
+        setProgress(100);
+        setRunning(false);
+        setResult({
+          mcProb,
+          momentumScore,
+          aiScore,
+          newsScore,
+          amdConfidence: hasAmd ? aiAnalysis.amd_confidence : null,
+          amdPhase: hasAi ? aiAnalysis.amd_phase : null,
+          amdStatus,
+          ensemble,
+          weights,
+          histogram,
+          bigUpPct: (bigUp / NSIM) * 100,
+          bigDownPct: (bigDown / NSIM) * 100,
+          nsim: NSIM,
+          horizonLabel: `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`,
+          thesis,
+        });
+        return;
+      }
+      setProgress(p);
+      rafRef.current = setTimeout(step, 40);
+    };
+    step();
+  }
+
+  useEffect(() => () => clearTimeout(rafRef.current), []);
+
+  const verdictColor = (v) => (v >= 55 ? "text-green-400" : v <= 45 ? "text-red-400" : "text-amber-400");
+  const verdictText = (v) =>
+    v >= 60 ? "ÖVERVIKT UPP" : v >= 52 ? "SVAG ÖVERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG ÖVERVIKT NER" : "ÖVERVIKT NER";
+
+  const gaugeAngle = result ? -90 + (result.ensemble / 100) * 180 : -90;
+
+  return (
+    <div className="min-h-screen bg-black text-amber-400 font-mono p-4 md:p-8">
+      <div className="max-w-3xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-amber-800 pb-3 mb-6">
+          <div>
+            <div className="text-xs tracking-widest text-amber-700">SIMULATOR // v2.0</div>
+            <h1 className="text-xl md:text-2xl tracking-wider text-amber-300 font-bold">SANNOLIKHETSTERMINAL</h1>
+          </div>
+          <div className="text-right text-xs text-amber-700">
+            <div className="flex items-center gap-2 justify-end">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span>AKTIV</span>
+            </div>
+            <div>{clock.toLocaleTimeString("sv-SE")}</div>
+          </div>
+        </div>
+
+        {/* Image analysis panel */}
+        <div className="border border-amber-800 p-4 mb-6">
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
+          <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+            Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden och fyller i volatilitet och
+            momentum åt dig nedan.
+          </p>
+
+          {!imagePreview && (
+            <label className="block border border-dashed border-amber-800 hover:border-amber-500 p-6 text-center cursor-pointer transition-colors">
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+              <span className="text-xs text-amber-600 tracking-widest">+ VÄLJ BILD PÅ KURSGRAF</span>
+            </label>
+          )}
+
+          {imagePreview && (
+            <div className="space-y-3">
+              <div className="flex gap-3 items-start">
+                <img src={imagePreview} alt="Uppladdad graf" className="w-32 h-32 object-cover border border-amber-800" />
+                <div className="flex-1 space-y-2">
+                  <button
+                    onClick={analyzeImage}
+                    disabled={analyzing}
+                    className="w-full border border-amber-500 text-amber-300 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+                  >
+                    {analyzing ? "ANALYSERAR GRAF..." : "ANALYSERA GRAF >"}
+                  </button>
+                  <button
+                    onClick={clearImage}
+                    className="w-full border border-amber-900 text-amber-700 py-2 text-xs tracking-widest hover:border-amber-600 transition-colors"
+                  >
+                    TA BORT BILD
+                  </button>
+                </div>
+              </div>
+
+              {aiError && <div className="text-xs text-red-400 border border-red-900 p-2">{aiError}</div>}
+
+              {aiAnalysis && (
+                <div className="border border-amber-900 p-3 text-xs space-y-1.5">
+                  <div className="text-amber-300">
+                    TREND: <span className="text-amber-100">{momentumLabel}</span> · AI-SANNOLIKHET UPP:{" "}
+                    <span className="text-amber-100">{aiAnalysis.confidence}%</span>
+                  </div>
+                  {aiAnalysis.reasoning && (
+                    <div className="text-amber-500 leading-relaxed">
+                      <span className="text-amber-700">MOTIVERING: </span>
+                      {aiAnalysis.reasoning}
+                    </div>
+                  )}
+                  {aiAnalysis.commentary && <div className="text-amber-600 leading-relaxed">{aiAnalysis.commentary}</div>}
+                  {aiAnalysis.chart_type && (
+                    <div className="text-amber-800">Graftyp identifierad: {aiAnalysis.chart_type}</div>
+                  )}
+                  {aiAnalysis.premarket_detected && (
+                    <div className="border border-amber-900 bg-amber-950/40 px-2 py-1.5 text-amber-500 leading-relaxed">
+                      <span className="text-amber-700">FÖRHANDEL/EFTERHANDEL UPPTÄCKT</span>
+                      {typeof aiAnalysis.premarket_move_pct === "number" && (
+                        <span> ({aiAnalysis.premarket_move_pct > 0 ? "+" : ""}{aiAnalysis.premarket_move_pct}%)</span>
+                      )}
+                      {aiAnalysis.premarket_notes && <div>{aiAnalysis.premarket_notes}</div>}
+                      <div className="text-amber-800">
+                        Endast informativt — vägs inte in i sannolikheten eftersom förhandel har tunnare volym.
+                      </div>
+                    </div>
+                  )}
+                  {aiAnalysis.candlestick_pattern && aiAnalysis.candlestick_reasoning && (
+                    <div className="text-amber-500 leading-relaxed">
+                      <span className="text-amber-700">CANDLESTICK-MÖNSTER ({aiAnalysis.candlestick_pattern}): </span>
+                      {aiAnalysis.candlestick_reasoning}
+                    </div>
+                  )}
+                  {aiAnalysis.amd_reasoning && (
+                    <div className="text-amber-500 leading-relaxed">
+                      <span className="text-amber-700">
+                        AMD ({aiAnalysis.amd_phase === "unclear" || !aiAnalysis.amd_phase ? "otydligt" : aiAnalysis.amd_phase}):{" "}
+                      </span>
+                      {aiAnalysis.amd_reasoning}
+                      <span className="text-amber-800"> — används endast om den håller med övriga metoder.</span>
+                    </div>
+                  )}
+                  <div className="text-amber-800 pt-1 border-t border-amber-900">
+                    Automatiskt ifyllt:{" "}
+                    {aiAnalysis.price_detected ? `pris ${aiAnalysis.price_detected}, ` : "pris ej avläsbart (fyll i manuellt), "}
+                    volatilitet, drift och momentum. Justera valfritt fält nedan innan du kör simuleringen.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* News analysis panel */}
+        <div className="border border-amber-800 p-4 mb-6">
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">— NYHETSANALYS FÖR AKTIE (VALFRITT) —</div>
+          <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+            Skriv in en ticker/bolagsnamn. AI:n söker efter aktuella nyheter med trolig, relativt precis påverkan på
+            just den aktien under din valda hållperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) — bra för
+            hävstångscertifikat där riktningens säkerhet spelar större roll än rörelsens storlek.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+              placeholder="t.ex. NVDA, Seagate, SPG"
+              className="flex-1 bg-black border border-amber-900 focus:border-amber-500 text-amber-300 px-2 py-2 outline-none text-sm"
+            />
+            <button
+              onClick={analyzeNews}
+              disabled={newsAnalyzing || !ticker.trim()}
+              className="border border-amber-500 text-amber-300 px-4 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+            >
+              {newsAnalyzing ? "SÖKER..." : "SÖK NYHETER >"}
+            </button>
+          </div>
+
+          {newsError && <div className="text-xs text-red-400 border border-red-900 p-2 mt-3">{newsError}</div>}
+
+          {newsAnalysis && (
+            <div className="border border-amber-900 p-3 text-xs space-y-1.5 mt-3">
+              <div className="flex justify-between items-start">
+                <div className="text-amber-300">
+                  RIKTNING:{" "}
+                  <span className="text-amber-100">
+                    {newsAnalysis.direction === "upp" ? "UPP" : newsAnalysis.direction === "ner" ? "NER" : "OKLART"}
+                  </span>{" "}
+                  · SÄKERHET: <span className="text-amber-100">{newsAnalysis.confidence}%</span>
+                </div>
+                <button onClick={clearNews} className="text-amber-800 hover:text-amber-500 text-xs">
+                  RENSA
+                </button>
+              </div>
+              {newsAnalysis.magnitude_note && (
+                <div className="text-amber-600 leading-relaxed">
+                  <span className="text-amber-700">FÖRVÄNTAD STORLEK: </span>
+                  {newsAnalysis.magnitude_note}
+                </div>
+              )}
+              {newsAnalysis.reasoning && (
+                <div className="text-amber-500 leading-relaxed">
+                  <span className="text-amber-700">MOTIVERING: </span>
+                  {newsAnalysis.reasoning}
+                </div>
+              )}
+              {Array.isArray(newsAnalysis.key_news) && newsAnalysis.key_news.length > 0 && (
+                <ul className="text-amber-600 leading-relaxed list-disc list-inside space-y-0.5">
+                  {newsAnalysis.key_news.map((n, i) => (
+                    <li key={i}>
+                      <span
+                        className={
+                          n.impact === "positiv" ? "text-green-400" : n.impact === "negativ" ? "text-red-400" : "text-amber-500"
+                        }
+                      >
+                        [{n.impact}]
+                      </span>{" "}
+                      {n.headline}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {newsAnalysis.direction === "oklart" && (
+                <div className="text-amber-800 pt-1 border-t border-amber-900">
+                  Inga tydliga bolagsspecifika nyheter hittades — vägs därför inte in i simuleringen.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Input panel */}
+        <div className="border border-amber-800 p-4 mb-6">
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">— INDATA —</div>
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="PRIS" value={price} onChange={setPrice} min={1} step={1} suffix="" />
+            <Field label="VOLATILITET" value={vol} onChange={setVol} min={1} max={150} step={1} suffix="%" />
+            <Field label="DRIFT (ÅRLIG)" value={drift} onChange={setDrift} min={-100} max={100} step={1} suffix="%" />
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs text-amber-700 mb-2 tracking-widest">HÅLLPERIOD</div>
+            <div className="flex gap-2 mb-2 flex-wrap">
+              {HORIZON_PRESETS.map((h) => {
+                const active = horizonAmount === h.amount && horizonUnit === h.unit;
+                return (
+                  <button
+                    key={h.label}
+                    onClick={() => {
+                      setHorizonAmount(h.amount);
+                      setHorizonUnit(h.unit);
+                    }}
+                    className={`border px-2 py-2 text-xs tracking-widest transition-colors ${
+                      active ? "border-amber-400 bg-amber-950 text-amber-300" : "border-amber-900 text-amber-700 hover:border-amber-600"
+                    }`}
+                  >
+                    {h.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex gap-2">
+              <div className="flex items-center border border-amber-900 focus-within:border-amber-500 flex-1">
+                <input
+                  type="number"
+                  value={horizonAmount}
+                  min={0.1}
+                  step={0.1}
+                  onChange={(e) => setHorizonAmount(Math.max(0.1, Number(e.target.value)))}
+                  className="w-full bg-black text-amber-300 px-2 py-2 outline-none text-sm"
+                />
+              </div>
+              <select
+                value={horizonUnit}
+                onChange={(e) => setHorizonUnit(e.target.value)}
+                className="border border-amber-900 bg-black text-amber-300 px-2 py-2 text-sm outline-none focus:border-amber-500"
+              >
+                {Object.entries(UNIT_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="text-xs text-amber-800 mt-1">
+              Egen hållperiod ner till enstaka minuter, för daytrading (upp till en handelsdag, ca 6,5h).
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs text-amber-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÅN AI-ANALYS)</div>
+            <div className="flex gap-2">
+              {["bearish", "neutral", "bullish"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMomentum(m)}
+                  className={`flex-1 border px-2 py-2 text-xs tracking-widest transition-colors ${
+                    momentum === m
+                      ? "border-amber-400 bg-amber-950 text-amber-300"
+                      : "border-amber-900 text-amber-700 hover:border-amber-600"
+                  }`}
+                >
+                  {m === "bearish" ? "NEDÅT" : m === "neutral" ? "SIDLED" : "UPPÅT"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs text-amber-700 mb-2 tracking-widest">DIN TES: BULL ELLER BEAR?</div>
+            <div className="flex gap-2">
+              {["bull", "bear"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setThesis(t)}
+                  className={`flex-1 border px-2 py-2 text-xs tracking-widest transition-colors ${
+                    thesis === t
+                      ? t === "bull"
+                        ? "border-green-500 bg-green-950 text-green-300"
+                        : "border-red-500 bg-red-950 text-red-300"
+                      : "border-amber-900 text-amber-700 hover:border-amber-600"
+                  }`}
+                >
+                  {t === "bull" ? "BULL (TROR PÅ UPPGÅNG)" : "BEAR (TROR PÅ NEDGÅNG)"}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-amber-800 mt-1">
+              Bara en markering av vad du hoppas/tror på — påverkar inte AI:ns analys, bara hur resultatet
+              lyfts fram nedan.
+            </div>
+          </div>
+
+          <button
+            onClick={runSimulation}
+            disabled={running}
+            className="mt-5 w-full border border-amber-500 text-amber-300 py-3 tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+          >
+            {running ? `KÖR SIMULERING... ${Math.floor(progress)}%` : "KÖR SIMULERING >"}
+          </button>
+          {running && (
+            <div className="h-1 bg-amber-950 mt-2 overflow-hidden">
+              <div className="h-full bg-amber-400 transition-all duration-75" style={{ width: `${progress}%` }} />
+            </div>
+          )}
+        </div>
+
+        {/* Results */}
+        {result && (
+          <div className="border border-amber-800 p-4 space-y-6">
+            <div className="text-xs text-amber-700 tracking-widest">
+              — RESULTAT ({result.nsim.toLocaleString("sv-SE")} SIMULERADE UTFALL) —
+            </div>
+
+            {/* Gauge */}
+            <div className="flex flex-col items-center py-2">
+              <svg width="220" height="130" viewBox="0 0 220 130">
+                <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke="#78350f" strokeWidth="10" />
+                <path
+                  d="M 20 110 A 90 90 0 0 1 200 110"
+                  fill="none"
+                  stroke={result.ensemble >= 55 ? "#4ade80" : result.ensemble <= 45 ? "#f87171" : "#fbbf24"}
+                  strokeWidth="10"
+                  strokeDasharray={`${(result.ensemble / 100) * 283} 283`}
+                />
+                <line
+                  x1="110"
+                  y1="110"
+                  x2="110"
+                  y2="35"
+                  stroke="#fbbf24"
+                  strokeWidth="2"
+                  style={{
+                    transform: `rotate(${gaugeAngle}deg)`,
+                    transformOrigin: "110px 110px",
+                    transition: "transform 0.6s ease-out",
+                  }}
+                />
+                <circle cx="110" cy="110" r="4" fill="#fbbf24" />
+              </svg>
+              <div className={`text-4xl font-bold -mt-2 ${verdictColor(result.ensemble)}`}>
+                {result.ensemble.toFixed(1)}%
+              </div>
+              <div className={`text-xs tracking-widest mt-1 ${verdictColor(result.ensemble)}`}>
+                {verdictText(result.ensemble)} — SANNOLIKHET FÖR UPPGÅNG OM {result.horizonLabel}
+              </div>
+              <div className="flex gap-6 mt-3 text-sm">
+                <div className={`text-center ${result.thesis === "bull" ? "opacity-100" : "opacity-50"}`}>
+                  <div className="text-green-400 font-bold">{result.ensemble.toFixed(1)}%</div>
+                  <div className="text-amber-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " ← DIN TES" : ""}</div>
+                </div>
+                <div className={`text-center ${result.thesis === "bear" ? "opacity-100" : "opacity-50"}`}>
+                  <div className="text-red-400 font-bold">{(100 - result.ensemble).toFixed(1)}%</div>
+                  <div className="text-amber-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " ← DIN TES" : ""}</div>
+                </div>
+              </div>
+              <div
+                className={`mt-3 text-xs border px-3 py-1.5 ${
+                  (result.thesis === "bull" ? result.ensemble : 100 - result.ensemble) >= 55
+                    ? "border-green-900 text-green-400"
+                    : (result.thesis === "bull" ? result.ensemble : 100 - result.ensemble) <= 45
+                    ? "border-red-900 text-red-400"
+                    : "border-amber-900 text-amber-600"
+                }`}
+              >
+                Din {result.thesis === "bull" ? "BULL" : "BEAR"}-tes stöds till{" "}
+                {(result.thesis === "bull" ? result.ensemble : 100 - result.ensemble).toFixed(1)}% av modellen
+              </div>
+            </div>
+
+            {/* Breakdown */}
+            <div
+              className="grid gap-3 text-center border-t border-b border-amber-900 py-3"
+              style={{
+                gridTemplateColumns: `repeat(${2 + (result.weights.ai > 0 ? 1 : 0) + (result.weights.news > 0 ? 1 : 0) + (result.weights.amd > 0 ? 1 : 0)}, minmax(0, 1fr))`,
+              }}
+            >
+              <div>
+                <div className="text-xs text-amber-700">MONTE CARLO</div>
+                <div className="text-lg text-amber-300">{result.mcProb.toFixed(1)}%</div>
+                <div className="text-xs text-amber-800">vikt {result.weights.mc}%</div>
+              </div>
+              <div>
+                <div className="text-xs text-amber-700">MOMENTUM</div>
+                <div className="text-lg text-amber-300">{result.momentumScore.toFixed(1)}%</div>
+                <div className="text-xs text-amber-800">vikt {result.weights.momentum}%</div>
+              </div>
+              {result.weights.ai > 0 && (
+                <div>
+                  <div className="text-xs text-amber-700">AI-BILDANALYS</div>
+                  <div className="text-lg text-amber-300">{result.aiScore.toFixed(1)}%</div>
+                  <div className="text-xs text-amber-800">vikt {result.weights.ai}%</div>
+                </div>
+              )}
+              {result.weights.news > 0 && (
+                <div>
+                  <div className="text-xs text-amber-700">NYHETSANALYS</div>
+                  <div className="text-lg text-amber-300">{result.newsScore.toFixed(1)}%</div>
+                  <div className="text-xs text-amber-800">vikt {result.weights.news}%</div>
+                </div>
+              )}
+              {result.weights.amd > 0 && (
+                <div>
+                  <div className="text-xs text-amber-700">AMD (BACKUP)</div>
+                  <div className="text-lg text-green-400">{result.amdConfidence.toFixed(1)}%</div>
+                  <div className="text-xs text-amber-800">vikt {result.weights.amd}%</div>
+                </div>
+              )}
+            </div>
+
+            {/* AMD status line - always visible when a chart was analyzed, so it's clear when AMD was NOT used */}
+            {result.amdStatus !== "none" && (
+              <div
+                className={`text-xs border px-3 py-2 ${
+                  result.amdStatus === "confirmed"
+                    ? "border-green-900 text-green-400"
+                    : "border-amber-900 text-amber-700"
+                }`}
+              >
+                {result.amdStatus === "confirmed" &&
+                  `AMD-mönster (${result.amdPhase}) bekräftar samma riktning som övriga metoder — vägdes in med 20%.`}
+                {result.amdStatus === "contradicted" &&
+                  `AMD-mönster (${result.amdPhase}) pekade åt motsatt håll mot övriga metoder — ignorerades.`}
+                {result.amdStatus === "unclear" &&
+                  "AMD-mönster kunde inte identifieras tydligt i grafen — ignorerades."}
+              </div>
+            )}
+
+            <div className="flex justify-between text-xs text-amber-600">
+              <span>P(rörelse &gt; +5%): {result.bigUpPct.toFixed(1)}%</span>
+              <span>P(rörelse &gt; -5%): {result.bigDownPct.toFixed(1)}%</span>
+            </div>
+
+            {/* Histogram */}
+            <div>
+              <div className="text-xs text-amber-700 mb-2 tracking-widest">FÖRDELNING AV SIMULERADE SLUTPRISER</div>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={result.histogram}>
+                  <XAxis dataKey="x" tick={false} axisLine={{ stroke: "#78350f" }} />
+                  <YAxis hide />
+                  <ReferenceLine x={price} stroke="#fbbf24" strokeDasharray="3 3" />
+                  <Bar dataKey="count">
+                    {result.histogram.map((entry, i) => (
+                      <Cell key={i} fill={entry.isUp ? "#4ade80" : "#f87171"} fillOpacity={0.7} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="text-xs text-amber-800 text-center mt-1">
+                streckad linje = nuvarande pris ({price})
+              </div>
+            </div>
+
+            <div className="border-t border-amber-900 pt-3 text-xs text-amber-700 leading-relaxed">
+              OBS: siffran ovan är en simulering baserad på dina antaganden om volatilitet och drift, en förenklad
+              momentum-modell, och (om använda) en AI-bedömning av en graf-bild samt en nyhetsbaserad bedömning av
+              enskild aktie. Den är inte kalibrerad mot verkliga utfall och utgör inte finansiell rådgivning.
+              Hävstångscertifikat förstärker både vinster och förluster - en hög "säkerhet" i modellen är fortfarande
+              ingen garanti, och en felbedömning slår hårdare med hävstång. Historiska mönster och simulerad statistik
+              förutsäger inte framtida kursrörelser med någon garanti.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, min, max, step, suffix }) {
+  return (
+    <div>
+      <div className="text-xs text-amber-700 mb-1">{label}</div>
+      <div className="flex items-center border border-amber-900 focus-within:border-amber-500">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full bg-black text-amber-300 px-2 py-2 outline-none text-sm"
+        />
+        {suffix && <span className="pr-2 text-amber-700 text-xs">{suffix}</span>}
+      </div>
+    </div>
+  );
+}
