@@ -152,7 +152,47 @@ export default function SannolikhetsTerminal() {
   }
 
   async function analyzeNews() {
-    setNewsError("AI-nyhetsanalys är tillfälligt avstängd i GitHub Pages-versionen. Den kopplas senare via en säker backend så att ingen API-nyckel exponeras.");
+  if (!ticker.trim()) return;
+
+  setNewsAnalyzing(true);
+  setNewsError(null);
+  setNewsAnalysis(null);
+
+  const horizonText = `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`;
+
+  try {
+    const response = await fetch("/api/analyze-news", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ticker: ticker.trim(),
+        horizonText,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.message ||
+        data?.error ||
+        "API-fel"
+      );
+    }
+
+    setNewsAnalysis(data);
+  } catch (err) {
+    console.error(err);
+
+    setNewsError(
+      `Kunde inte hämta nyhetsanalys (${err.message || "okänt fel"}).`
+    );
+  } finally {
+    setNewsAnalyzing(false);
+  }
+}
   }
 
   function clearNews() {
