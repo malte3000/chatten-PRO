@@ -191,7 +191,7 @@ export default function SannolikhetsTerminal() {
     );
   } finally {
     setNewsAnalyzing(false);
-  }
+
 }
   }
 
