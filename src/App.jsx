@@ -72,7 +72,74 @@ export default function SannolikhetsTerminal() {
   }
 
   async function analyzeImage() {
-    setAiError("AI-bildanalys är tillfälligt avstängd i GitHub Pages-versionen. Den kopplas senare via en säker backend så att ingen API-nyckel exponeras.");
+  if (!imageBase64) return;
+
+  setAnalyzing(true);
+  setAiError(null);
+  setAiAnalysis(null);
+
+  try {
+    const response = await fetch("/api/analyze-image", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        imageBase64,
+        imageMediaType,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || "API-fel");
+    }
+
+    setAiAnalysis(data);
+
+    if (
+      data.trend === "bullish" ||
+      data.trend === "neutral" ||
+      data.trend === "bearish"
+    ) {
+      setMomentum(data.trend);
+    }
+
+    if (typeof data.volatility_estimate === "number") {
+      setVol(
+        Math.max(
+          1,
+          Math.min(150, Math.round(data.volatility_estimate))
+        )
+      );
+    }
+
+    if (typeof data.drift_estimate === "number") {
+      setDrift(
+        Math.max(
+          -100,
+          Math.min(100, Math.round(data.drift_estimate))
+        )
+      );
+    }
+
+    if (
+      typeof data.price_detected === "number" &&
+      data.price_detected > 0
+    ) {
+      setPrice(Math.round(data.price_detected * 100) / 100);
+    }
+  } catch (err) {
+    console.error(err);
+
+    setAiError(
+      `Kunde inte tolka grafen (${err.message || "okänt fel"}).`
+    );
+  } finally {
+    setAnalyzing(false);
+  }
+}
   }
 
   function clearImage() {
