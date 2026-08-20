@@ -11,6 +11,60 @@ const HORIZON_PRESETS = [
   { label: "HELA DAGEN", amount: 6.5, unit: "timmar" },
 ];
 
+function clampPercent(value) {
+  return Math.min(100, Math.max(0, value));
+}
+
+function asPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return clampPercent(Math.abs(numeric) <= 1 ? numeric * 100 : numeric);
+}
+
+function getPatternMarker(analysis) {
+  if (!analysis) return null;
+
+  const technicalPattern = analysis.technical_pattern;
+  const region =
+    analysis.pattern_annotation ||
+    analysis.technical_pattern_annotation ||
+    analysis.pattern_region ||
+    analysis.pattern_box ||
+    (technicalPattern && typeof technicalPattern === "object"
+      ? technicalPattern.region || technicalPattern.bbox
+      : null);
+  const box = region?.bbox || region?.box || region?.region || region;
+  const x = asPercent(box?.x ?? box?.left);
+  const y = asPercent(box?.y ?? box?.top);
+  const right = asPercent(box?.right);
+  const bottom = asPercent(box?.bottom);
+  const rawWidth = asPercent(box?.width);
+  const rawHeight = asPercent(box?.height);
+  const width = rawWidth ?? (x !== null && right !== null ? right - x : null);
+  const height = rawHeight ?? (y !== null && bottom !== null ? bottom - y : null);
+  const hasBox = x !== null && y !== null && width !== null && height !== null && width > 0 && height > 0;
+  const label =
+    region?.label ||
+    region?.name ||
+    (technicalPattern && typeof technicalPattern === "object" ? technicalPattern.name || technicalPattern.label : technicalPattern) ||
+    analysis.candlestick_pattern ||
+    (analysis.amd_phase && analysis.amd_phase !== "unclear" ? `AMD: ${analysis.amd_phase}` : null);
+
+  if (!label) return null;
+
+  return {
+    label: String(label),
+    box: hasBox
+      ? {
+          left: x,
+          top: y,
+          width: Math.min(width, 100 - x),
+          height: Math.min(height, 100 - y),
+        }
+      : null,
+  };
+}
+
 export default function SannolikhetsTerminal() {
   const [price, setPrice] = useState(100);
   const [vol, setVol] = useState(35);
@@ -134,7 +188,7 @@ export default function SannolikhetsTerminal() {
     console.error(err);
 
     setAiError(
-      `Kunde inte tolka grafen (${err.message || "okänt fel"}).`
+      `Kunde inte tolka grafen (${err.message || "okÃƒÂ¤nt fel"}).`
     );
   } finally {
     setAnalyzing(false);
@@ -187,7 +241,7 @@ export default function SannolikhetsTerminal() {
     console.error(err);
 
     setNewsError(
-      `Kunde inte hämta nyhetsanalys (${err.message || "okänt fel"}).`
+      `Kunde inte hÃƒÂ¤mta nyhetsanalys (${err.message || "okÃƒÂ¤nt fel"}).`
     );
   } finally {
     setNewsAnalyzing(false);
@@ -207,7 +261,7 @@ export default function SannolikhetsTerminal() {
 
     const NSIM = 2500;
     const tradingDays = horizonAmount * UNIT_TO_TRADING_DAYS[horizonUnit];
-    const T = tradingDays / 252; // horisont uttryckt i handelsår
+    const T = tradingDays / 252; // horisont uttryckt i handelsÃƒÂ¥r
     const muAnnual = drift / 100;
     const sigmaAnnual = vol / 100;
     const finals = [];
@@ -215,9 +269,9 @@ export default function SannolikhetsTerminal() {
     let bigUp = 0;
     let bigDown = 0;
 
-    // Terminalfördelningen för geometrisk brownsk rörelse behöver bara ett steg
-    // till horisonten T (matematiskt likvärdigt med att stega dag för dag) -
-    // detta gör att korta horisonter ner till minuter hanteras korrekt.
+    // TerminalfÃƒÂ¶rdelningen fÃƒÂ¶r geometrisk brownsk rÃƒÂ¶relse behÃƒÂ¶ver bara ett steg
+    // till horisonten T (matematiskt likvÃƒÂ¤rdigt med att stega dag fÃƒÂ¶r dag) -
+    // detta gÃƒÂ¶r att korta horisonter ner till minuter hanteras korrekt.
     for (let i = 0; i < NSIM; i++) {
       const z = randNormal();
       const p = price * Math.exp((muAnnual - 0.5 * sigmaAnnual * sigmaAnnual) * T + sigmaAnnual * Math.sqrt(T) * z);
@@ -339,9 +393,10 @@ export default function SannolikhetsTerminal() {
 
   const verdictColor = (v) => (v >= 55 ? "text-green-400" : v <= 45 ? "text-red-400" : "text-amber-400");
   const verdictText = (v) =>
-    v >= 60 ? "ÖVERVIKT UPP" : v >= 52 ? "SVAG ÖVERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG ÖVERVIKT NER" : "ÖVERVIKT NER";
+    v >= 60 ? "Ãƒâ€“VERVIKT UPP" : v >= 52 ? "SVAG Ãƒâ€“VERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG Ãƒâ€“VERVIKT NER" : "Ãƒâ€“VERVIKT NER";
 
   const gaugeAngle = result ? -90 + (result.ensemble / 100) * 180 : -90;
+  const patternMarker = getPatternMarker(aiAnalysis);
 
   return (
     <div className="min-h-screen bg-black text-amber-400 font-mono p-4 md:p-8">
@@ -363,24 +418,54 @@ export default function SannolikhetsTerminal() {
 
         {/* Image analysis panel */}
         <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">Ã¢â‚¬â€ AI-BILDANALYS (VALFRITT) Ã¢â‚¬â€</div>
           <p className="text-xs text-amber-600 mb-3 leading-relaxed">
-            Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden och fyller i volatilitet och
-            momentum åt dig nedan.
+            Klistra in eller ladda upp en bild pÃƒÂ¥ en kursgraf. AI:n lÃƒÂ¤ser av trenden, markerar identifierade tekniska
+            mÃƒÂ¶nster direkt i grafen och fyller i volatilitet och momentum ÃƒÂ¥t dig nedan.
           </p>
 
           {!imagePreview && (
             <label className="block border border-dashed border-amber-800 hover:border-amber-500 p-6 text-center cursor-pointer transition-colors">
               <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
-              <span className="text-xs text-amber-600 tracking-widest">+ VÄLJ BILD PÅ KURSGRAF</span>
+              <span className="text-xs text-amber-600 tracking-widest">+ VÃƒâ€žLJ BILD PÃƒâ€¦ KURSGRAF</span>
             </label>
           )}
 
           {imagePreview && (
             <div className="space-y-3">
-              <div className="flex gap-3 items-start">
-                <img src={imagePreview} alt="Uppladdad graf" className="w-32 h-32 object-cover border border-amber-800" />
-                <div className="flex-1 space-y-2">
+              <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-start">
+                <div className="relative flex-1 min-w-0 overflow-hidden border border-amber-800 bg-black">
+                  <img src={imagePreview} alt="Uppladdad graf" className="block w-full max-h-80 object-contain" />
+                  {patternMarker && (
+                    <div className="absolute inset-0 pointer-events-none" aria-label={`AI-markerat mÃƒÂ¶nster: ${patternMarker.label}`}>
+                      {patternMarker.box && (
+                        <div
+                          className="absolute border-2 border-cyan-300 bg-cyan-400/10 shadow-[0_0_12px_rgba(103,232,249,0.75)]"
+                          style={{
+                            left: `${patternMarker.box.left}%`,
+                            top: `${patternMarker.box.top}%`,
+                            width: `${patternMarker.box.width}%`,
+                            height: `${patternMarker.box.height}%`,
+                          }}
+                        />
+                      )}
+                      <div
+                        className="absolute max-w-[calc(100%_-_0.5rem)] border border-cyan-300 bg-black/90 px-2 py-1 text-[10px] font-bold tracking-widest text-cyan-200 shadow-[0_0_10px_rgba(103,232,249,0.5)]"
+                        style={
+                          patternMarker.box
+                            ? {
+                                left: `${patternMarker.box.left}%`,
+                                top: `${Math.max(0, patternMarker.box.top - 8)}%`,
+                              }
+                            : { left: "0.5rem", top: "0.5rem" }
+                        }
+                      >
+                        AI-MÃƒâ€“NSTER: {patternMarker.label.toUpperCase()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="w-full md:w-44 space-y-2">
                   <button
                     onClick={analyzeImage}
                     disabled={analyzing}
@@ -402,7 +487,7 @@ export default function SannolikhetsTerminal() {
               {aiAnalysis && (
                 <div className="border border-amber-900 p-3 text-xs space-y-1.5">
                   <div className="text-amber-300">
-                    TREND: <span className="text-amber-100">{momentumLabel}</span> · AI-SANNOLIKHET UPP:{" "}
+                    TREND: <span className="text-amber-100">{momentumLabel}</span> Ã‚Â· AI-SANNOLIKHET UPP:{" "}
                     <span className="text-amber-100">{aiAnalysis.confidence}%</span>
                   </div>
                   {aiAnalysis.reasoning && (
@@ -417,19 +502,19 @@ export default function SannolikhetsTerminal() {
                   )}
                   {aiAnalysis.premarket_detected && (
                     <div className="border border-amber-900 bg-amber-950/40 px-2 py-1.5 text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">FÖRHANDEL/EFTERHANDEL UPPTÄCKT</span>
+                      <span className="text-amber-700">FÃƒâ€“RHANDEL/EFTERHANDEL UPPTÃƒâ€žCKT</span>
                       {typeof aiAnalysis.premarket_move_pct === "number" && (
                         <span> ({aiAnalysis.premarket_move_pct > 0 ? "+" : ""}{aiAnalysis.premarket_move_pct}%)</span>
                       )}
                       {aiAnalysis.premarket_notes && <div>{aiAnalysis.premarket_notes}</div>}
                       <div className="text-amber-800">
-                        Endast informativt — vägs inte in i sannolikheten eftersom förhandel har tunnare volym.
+                        Endast informativt Ã¢â‚¬â€ vÃƒÂ¤gs inte in i sannolikheten eftersom fÃƒÂ¶rhandel har tunnare volym.
                       </div>
                     </div>
                   )}
                   {aiAnalysis.candlestick_pattern && aiAnalysis.candlestick_reasoning && (
                     <div className="text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">CANDLESTICK-MÖNSTER ({aiAnalysis.candlestick_pattern}): </span>
+                      <span className="text-amber-700">CANDLESTICK-MÃƒâ€“NSTER ({aiAnalysis.candlestick_pattern}): </span>
                       {aiAnalysis.candlestick_reasoning}
                     </div>
                   )}
@@ -439,13 +524,13 @@ export default function SannolikhetsTerminal() {
                         AMD ({aiAnalysis.amd_phase === "unclear" || !aiAnalysis.amd_phase ? "otydligt" : aiAnalysis.amd_phase}):{" "}
                       </span>
                       {aiAnalysis.amd_reasoning}
-                      <span className="text-amber-800"> — används endast om den håller med övriga metoder.</span>
+                      <span className="text-amber-800"> Ã¢â‚¬â€ anvÃƒÂ¤nds endast om den hÃƒÂ¥ller med ÃƒÂ¶vriga metoder.</span>
                     </div>
                   )}
                   <div className="text-amber-800 pt-1 border-t border-amber-900">
                     Automatiskt ifyllt:{" "}
-                    {aiAnalysis.price_detected ? `pris ${aiAnalysis.price_detected}, ` : "pris ej avläsbart (fyll i manuellt), "}
-                    volatilitet, drift och momentum. Justera valfritt fält nedan innan du kör simuleringen.
+                    {aiAnalysis.price_detected ? `pris ${aiAnalysis.price_detected}, ` : "pris ej avlÃƒÂ¤sbart (fyll i manuellt), "}
+                    volatilitet, drift och momentum. Justera valfritt fÃƒÂ¤lt nedan innan du kÃƒÂ¶r simuleringen.
                   </div>
                 </div>
               )}
@@ -455,11 +540,11 @@ export default function SannolikhetsTerminal() {
 
         {/* News analysis panel */}
         <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— NYHETSANALYS FÖR AKTIE (VALFRITT) —</div>
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">Ã¢â‚¬â€ NYHETSANALYS FÃƒâ€“R AKTIE (VALFRITT) Ã¢â‚¬â€</div>
           <p className="text-xs text-amber-600 mb-3 leading-relaxed">
-            Skriv in en ticker/bolagsnamn. AI:n söker efter aktuella nyheter med trolig, relativt precis påverkan på
-            just den aktien under din valda hållperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) — bra för
-            hävstångscertifikat där riktningens säkerhet spelar större roll än rörelsens storlek.
+            Skriv in en ticker/bolagsnamn. AI:n sÃƒÂ¶ker efter aktuella nyheter med trolig, relativt precis pÃƒÂ¥verkan pÃƒÂ¥
+            just den aktien under din valda hÃƒÂ¥llperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) Ã¢â‚¬â€ bra fÃƒÂ¶r
+            hÃƒÂ¤vstÃƒÂ¥ngscertifikat dÃƒÂ¤r riktningens sÃƒÂ¤kerhet spelar stÃƒÂ¶rre roll ÃƒÂ¤n rÃƒÂ¶relsens storlek.
           </p>
           <div className="flex gap-2">
             <input
@@ -474,7 +559,7 @@ export default function SannolikhetsTerminal() {
               disabled={newsAnalyzing || !ticker.trim()}
               className="border border-amber-500 text-amber-300 px-4 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
             >
-              {newsAnalyzing ? "SÖKER..." : "SÖK NYHETER >"}
+              {newsAnalyzing ? "SÃƒâ€“KER..." : "SÃƒâ€“K NYHETER >"}
             </button>
           </div>
 
@@ -488,7 +573,7 @@ export default function SannolikhetsTerminal() {
                   <span className="text-amber-100">
                     {newsAnalysis.direction === "upp" ? "UPP" : newsAnalysis.direction === "ner" ? "NER" : "OKLART"}
                   </span>{" "}
-                  · SÄKERHET: <span className="text-amber-100">{newsAnalysis.confidence}%</span>
+                  Ã‚Â· SÃƒâ€žKERHET: <span className="text-amber-100">{newsAnalysis.confidence}%</span>
                 </div>
                 <button onClick={clearNews} className="text-amber-800 hover:text-amber-500 text-xs">
                   RENSA
@@ -496,7 +581,7 @@ export default function SannolikhetsTerminal() {
               </div>
               {newsAnalysis.magnitude_note && (
                 <div className="text-amber-600 leading-relaxed">
-                  <span className="text-amber-700">FÖRVÄNTAD STORLEK: </span>
+                  <span className="text-amber-700">FÃƒâ€“RVÃƒâ€žNTAD STORLEK: </span>
                   {newsAnalysis.magnitude_note}
                 </div>
               )}
@@ -524,7 +609,7 @@ export default function SannolikhetsTerminal() {
               )}
               {newsAnalysis.direction === "oklart" && (
                 <div className="text-amber-800 pt-1 border-t border-amber-900">
-                  Inga tydliga bolagsspecifika nyheter hittades — vägs därför inte in i simuleringen.
+                  Inga tydliga bolagsspecifika nyheter hittades Ã¢â‚¬â€ vÃƒÂ¤gs dÃƒÂ¤rfÃƒÂ¶r inte in i simuleringen.
                 </div>
               )}
             </div>
@@ -533,15 +618,15 @@ export default function SannolikhetsTerminal() {
 
         {/* Input panel */}
         <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— INDATA —</div>
+          <div className="text-xs text-amber-700 mb-3 tracking-widest">Ã¢â‚¬â€ INDATA Ã¢â‚¬â€</div>
           <div className="grid grid-cols-3 gap-4">
             <Field label="PRIS" value={price} onChange={setPrice} min={1} step={1} suffix="" />
             <Field label="VOLATILITET" value={vol} onChange={setVol} min={1} max={150} step={1} suffix="%" />
-            <Field label="DRIFT (ÅRLIG)" value={drift} onChange={setDrift} min={-100} max={100} step={1} suffix="%" />
+            <Field label="DRIFT (Ãƒâ€¦RLIG)" value={drift} onChange={setDrift} min={-100} max={100} step={1} suffix="%" />
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-amber-700 mb-2 tracking-widest">HÅLLPERIOD</div>
+            <div className="text-xs text-amber-700 mb-2 tracking-widest">HÃƒâ€¦LLPERIOD</div>
             <div className="flex gap-2 mb-2 flex-wrap">
               {HORIZON_PRESETS.map((h) => {
                 const active = horizonAmount === h.amount && horizonUnit === h.unit;
@@ -585,12 +670,12 @@ export default function SannolikhetsTerminal() {
               </select>
             </div>
             <div className="text-xs text-amber-800 mt-1">
-              Egen hållperiod ner till enstaka minuter, för daytrading (upp till en handelsdag, ca 6,5h).
+              Egen hÃƒÂ¥llperiod ner till enstaka minuter, fÃƒÂ¶r daytrading (upp till en handelsdag, ca 6,5h).
             </div>
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-amber-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÅN AI-ANALYS)</div>
+            <div className="text-xs text-amber-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÃƒâ€¦N AI-ANALYS)</div>
             <div className="flex gap-2">
               {["bearish", "neutral", "bullish"].map((m) => (
                 <button
@@ -602,7 +687,7 @@ export default function SannolikhetsTerminal() {
                       : "border-amber-900 text-amber-700 hover:border-amber-600"
                   }`}
                 >
-                  {m === "bearish" ? "NEDÅT" : m === "neutral" ? "SIDLED" : "UPPÅT"}
+                  {m === "bearish" ? "NEDÃƒâ€¦T" : m === "neutral" ? "SIDLED" : "UPPÃƒâ€¦T"}
                 </button>
               ))}
             </div>
@@ -623,12 +708,12 @@ export default function SannolikhetsTerminal() {
                       : "border-amber-900 text-amber-700 hover:border-amber-600"
                   }`}
                 >
-                  {t === "bull" ? "BULL (TROR PÅ UPPGÅNG)" : "BEAR (TROR PÅ NEDGÅNG)"}
+                  {t === "bull" ? "BULL (TROR PÃƒâ€¦ UPPGÃƒâ€¦NG)" : "BEAR (TROR PÃƒâ€¦ NEDGÃƒâ€¦NG)"}
                 </button>
               ))}
             </div>
             <div className="text-xs text-amber-800 mt-1">
-              Bara en markering av vad du hoppas/tror på — påverkar inte AI:ns analys, bara hur resultatet
+              Bara en markering av vad du hoppas/tror pÃƒÂ¥ Ã¢â‚¬â€ pÃƒÂ¥verkar inte AI:ns analys, bara hur resultatet
               lyfts fram nedan.
             </div>
           </div>
@@ -638,7 +723,7 @@ export default function SannolikhetsTerminal() {
             disabled={running}
             className="mt-5 w-full border border-amber-500 text-amber-300 py-3 tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
           >
-            {running ? `KÖR SIMULERING... ${Math.floor(progress)}%` : "KÖR SIMULERING >"}
+            {running ? `KÃƒâ€“R SIMULERING... ${Math.floor(progress)}%` : "KÃƒâ€“R SIMULERING >"}
           </button>
           {running && (
             <div className="h-1 bg-amber-950 mt-2 overflow-hidden">
@@ -651,7 +736,7 @@ export default function SannolikhetsTerminal() {
         {result && (
           <div className="border border-amber-800 p-4 space-y-6">
             <div className="text-xs text-amber-700 tracking-widest">
-              — RESULTAT ({result.nsim.toLocaleString("sv-SE")} SIMULERADE UTFALL) —
+              Ã¢â‚¬â€ RESULTAT ({result.nsim.toLocaleString("sv-SE")} SIMULERADE UTFALL) Ã¢â‚¬â€
             </div>
 
             {/* Gauge */}
@@ -684,16 +769,16 @@ export default function SannolikhetsTerminal() {
                 {result.ensemble.toFixed(1)}%
               </div>
               <div className={`text-xs tracking-widest mt-1 ${verdictColor(result.ensemble)}`}>
-                {verdictText(result.ensemble)} — SANNOLIKHET FÖR UPPGÅNG OM {result.horizonLabel}
+                {verdictText(result.ensemble)} Ã¢â‚¬â€ SANNOLIKHET FÃƒâ€“R UPPGÃƒâ€¦NG OM {result.horizonLabel}
               </div>
               <div className="flex gap-6 mt-3 text-sm">
                 <div className={`text-center ${result.thesis === "bull" ? "opacity-100" : "opacity-50"}`}>
                   <div className="text-green-400 font-bold">{result.ensemble.toFixed(1)}%</div>
-                  <div className="text-amber-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " ← DIN TES" : ""}</div>
+                  <div className="text-amber-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " Ã¢â€ Â DIN TES" : ""}</div>
                 </div>
                 <div className={`text-center ${result.thesis === "bear" ? "opacity-100" : "opacity-50"}`}>
                   <div className="text-red-400 font-bold">{(100 - result.ensemble).toFixed(1)}%</div>
-                  <div className="text-amber-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " ← DIN TES" : ""}</div>
+                  <div className="text-amber-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " Ã¢â€ Â DIN TES" : ""}</div>
                 </div>
               </div>
               <div
@@ -705,7 +790,7 @@ export default function SannolikhetsTerminal() {
                     : "border-amber-900 text-amber-600"
                 }`}
               >
-                Din {result.thesis === "bull" ? "BULL" : "BEAR"}-tes stöds till{" "}
+                Din {result.thesis === "bull" ? "BULL" : "BEAR"}-tes stÃƒÂ¶ds till{" "}
                 {(result.thesis === "bull" ? result.ensemble : 100 - result.ensemble).toFixed(1)}% av modellen
               </div>
             </div>
@@ -760,22 +845,22 @@ export default function SannolikhetsTerminal() {
                 }`}
               >
                 {result.amdStatus === "confirmed" &&
-                  `AMD-mönster (${result.amdPhase}) bekräftar samma riktning som övriga metoder — vägdes in med 20%.`}
+                  `AMD-mÃƒÂ¶nster (${result.amdPhase}) bekrÃƒÂ¤ftar samma riktning som ÃƒÂ¶vriga metoder Ã¢â‚¬â€ vÃƒÂ¤gdes in med 20%.`}
                 {result.amdStatus === "contradicted" &&
-                  `AMD-mönster (${result.amdPhase}) pekade åt motsatt håll mot övriga metoder — ignorerades.`}
+                  `AMD-mÃƒÂ¶nster (${result.amdPhase}) pekade ÃƒÂ¥t motsatt hÃƒÂ¥ll mot ÃƒÂ¶vriga metoder Ã¢â‚¬â€ ignorerades.`}
                 {result.amdStatus === "unclear" &&
-                  "AMD-mönster kunde inte identifieras tydligt i grafen — ignorerades."}
+                  "AMD-mÃƒÂ¶nster kunde inte identifieras tydligt i grafen Ã¢â‚¬â€ ignorerades."}
               </div>
             )}
 
             <div className="flex justify-between text-xs text-amber-600">
-              <span>P(rörelse &gt; +5%): {result.bigUpPct.toFixed(1)}%</span>
-              <span>P(rörelse &gt; -5%): {result.bigDownPct.toFixed(1)}%</span>
+              <span>P(rÃƒÂ¶relse &gt; +5%): {result.bigUpPct.toFixed(1)}%</span>
+              <span>P(rÃƒÂ¶relse &gt; -5%): {result.bigDownPct.toFixed(1)}%</span>
             </div>
 
             {/* Histogram */}
             <div>
-              <div className="text-xs text-amber-700 mb-2 tracking-widest">FÖRDELNING AV SIMULERADE SLUTPRISER</div>
+              <div className="text-xs text-amber-700 mb-2 tracking-widest">FÃƒâ€“RDELNING AV SIMULERADE SLUTPRISER</div>
               <ResponsiveContainer width="100%" height={140}>
                 <BarChart data={result.histogram}>
                   <XAxis dataKey="x" tick={false} axisLine={{ stroke: "#78350f" }} />
@@ -794,12 +879,12 @@ export default function SannolikhetsTerminal() {
             </div>
 
             <div className="border-t border-amber-900 pt-3 text-xs text-amber-700 leading-relaxed">
-              OBS: siffran ovan är en simulering baserad på dina antaganden om volatilitet och drift, en förenklad
-              momentum-modell, och (om använda) en AI-bedömning av en graf-bild samt en nyhetsbaserad bedömning av
-              enskild aktie. Den är inte kalibrerad mot verkliga utfall och utgör inte finansiell rådgivning.
-              Hävstångscertifikat förstärker både vinster och förluster - en hög "säkerhet" i modellen är fortfarande
-              ingen garanti, och en felbedömning slår hårdare med hävstång. Historiska mönster och simulerad statistik
-              förutsäger inte framtida kursrörelser med någon garanti.
+              OBS: siffran ovan ÃƒÂ¤r en simulering baserad pÃƒÂ¥ dina antaganden om volatilitet och drift, en fÃƒÂ¶renklad
+              momentum-modell, och (om anvÃƒÂ¤nda) en AI-bedÃƒÂ¶mning av en graf-bild samt en nyhetsbaserad bedÃƒÂ¶mning av
+              enskild aktie. Den ÃƒÂ¤r inte kalibrerad mot verkliga utfall och utgÃƒÂ¶r inte finansiell rÃƒÂ¥dgivning.
+              HÃƒÂ¤vstÃƒÂ¥ngscertifikat fÃƒÂ¶rstÃƒÂ¤rker bÃƒÂ¥de vinster och fÃƒÂ¶rluster - en hÃƒÂ¶g "sÃƒÂ¤kerhet" i modellen ÃƒÂ¤r fortfarande
+              ingen garanti, och en felbedÃƒÂ¶mning slÃƒÂ¥r hÃƒÂ¥rdare med hÃƒÂ¤vstÃƒÂ¥ng. Historiska mÃƒÂ¶nster och simulerad statistik
+              fÃƒÂ¶rutsÃƒÂ¤ger inte framtida kursrÃƒÂ¶relser med nÃƒÂ¥gon garanti.
             </div>
           </div>
         )}
@@ -827,3 +912,5 @@ function Field({ label, value, onChange, min, max, step, suffix }) {
     </div>
   );
 }
+
+
