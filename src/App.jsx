@@ -11,6 +11,60 @@ const HORIZON_PRESETS = [
   { label: "HELA DAGEN", amount: 6.5, unit: "timmar" },
 ];
 
+function clampPercent(value) {
+  return Math.min(100, Math.max(0, value));
+}
+
+function asPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return clampPercent(Math.abs(numeric) <= 1 ? numeric * 100 : numeric);
+}
+
+function getPatternMarker(analysis) {
+  if (!analysis) return null;
+
+  const technicalPattern = analysis.technical_pattern;
+  const region =
+    analysis.pattern_annotation ||
+    analysis.technical_pattern_annotation ||
+    analysis.pattern_region ||
+    analysis.pattern_box ||
+    (technicalPattern && typeof technicalPattern === "object"
+      ? technicalPattern.region || technicalPattern.bbox
+      : null);
+  const box = region?.bbox || region?.box || region?.region || region;
+  const x = asPercent(box?.x ?? box?.left);
+  const y = asPercent(box?.y ?? box?.top);
+  const right = asPercent(box?.right);
+  const bottom = asPercent(box?.bottom);
+  const rawWidth = asPercent(box?.width);
+  const rawHeight = asPercent(box?.height);
+  const width = rawWidth ?? (x !== null && right !== null ? right - x : null);
+  const height = rawHeight ?? (y !== null && bottom !== null ? bottom - y : null);
+  const hasBox = x !== null && y !== null && width !== null && height !== null && width > 0 && height > 0;
+  const label =
+    region?.label ||
+    region?.name ||
+    (technicalPattern && typeof technicalPattern === "object" ? technicalPattern.name || technicalPattern.label : technicalPattern) ||
+    analysis.candlestick_pattern ||
+    (analysis.amd_phase && analysis.amd_phase !== "unclear" ? `AMD: ${analysis.amd_phase}` : null);
+
+  if (!label) return null;
+
+  return {
+    label: String(label),
+    box: hasBox
+      ? {
+          left: x,
+          top: y,
+          width: Math.min(width, 100 - x),
+          height: Math.min(height, 100 - y),
+        }
+      : null,
+  };
+}
+
 export default function SannolikhetsTerminal() {
   const [price, setPrice] = useState(100);
   const [vol, setVol] = useState(35);
@@ -342,6 +396,7 @@ export default function SannolikhetsTerminal() {
     v >= 60 ? "ÖVERVIKT UPP" : v >= 52 ? "SVAG ÖVERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG ÖVERVIKT NER" : "ÖVERVIKT NER";
 
   const gaugeAngle = result ? -90 + (result.ensemble / 100) * 180 : -90;
+  const patternMarker = getPatternMarker(aiAnalysis);
 
   return (
     <div className="min-h-screen bg-black text-amber-400 font-mono p-4 md:p-8">
@@ -365,8 +420,8 @@ export default function SannolikhetsTerminal() {
         <div className="border border-amber-800 p-4 mb-6">
           <div className="text-xs text-amber-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
           <p className="text-xs text-amber-600 mb-3 leading-relaxed">
-            Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden och fyller i volatilitet och
-            momentum åt dig nedan.
+            Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden, markerar identifierade tekniska
+            mönster direkt i grafen och fyller i volatilitet och momentum åt dig nedan.
           </p>
 
           {!imagePreview && (
@@ -378,9 +433,39 @@ export default function SannolikhetsTerminal() {
 
           {imagePreview && (
             <div className="space-y-3">
-              <div className="flex gap-3 items-start">
-                <img src={imagePreview} alt="Uppladdad graf" className="w-32 h-32 object-cover border border-amber-800" />
-                <div className="flex-1 space-y-2">
+              <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-start">
+                <div className="relative flex-1 min-w-0 overflow-hidden border border-amber-800 bg-black">
+                  <img src={imagePreview} alt="Uppladdad graf" className="block w-full max-h-80 object-contain" />
+                  {patternMarker && (
+                    <div className="absolute inset-0 pointer-events-none" aria-label={`AI-markerat mönster: ${patternMarker.label}`}>
+                      {patternMarker.box && (
+                        <div
+                          className="absolute border-2 border-cyan-300 bg-cyan-400/10 shadow-[0_0_12px_rgba(103,232,249,0.75)]"
+                          style={{
+                            left: `${patternMarker.box.left}%`,
+                            top: `${patternMarker.box.top}%`,
+                            width: `${patternMarker.box.width}%`,
+                            height: `${patternMarker.box.height}%`,
+                          }}
+                        />
+                      )}
+                      <div
+                        className="absolute max-w-[calc(100%_-_0.5rem)] border border-cyan-300 bg-black/90 px-2 py-1 text-[10px] font-bold tracking-widest text-cyan-200 shadow-[0_0_10px_rgba(103,232,249,0.5)]"
+                        style={
+                          patternMarker.box
+                            ? {
+                                left: `${patternMarker.box.left}%`,
+                                top: `${Math.max(0, patternMarker.box.top - 8)}%`,
+                              }
+                            : { left: "0.5rem", top: "0.5rem" }
+                        }
+                      >
+                        AI-MÖNSTER: {patternMarker.label.toUpperCase()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="w-full md:w-44 space-y-2">
                   <button
                     onClick={analyzeImage}
                     disabled={analyzing}
