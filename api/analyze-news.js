@@ -1,15 +1,22 @@
+import { getMarketStatus } from "./_market-hours.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { ticker, horizonText } = req.body || {};
+    const { ticker, horizonText, market = "stockholm" } = req.body || {};
 
     if (!ticker || !ticker.trim()) {
       return res.status(400).json({
         error: "Ticker eller bolagsnamn saknas",
       });
+    }
+
+    const marketStatus = getMarketStatus(market);
+    if (!marketStatus.isOpen) {
+      return res.status(423).json({ error: "MARKET_CLOSED", message: `${marketStatus.label} är stängd. Nyhetsanalysen kördes inte.`, marketStatus });
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -142,3 +149,4 @@ Skriv all text på svenska.
     });
   }
 }
+

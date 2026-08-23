@@ -1,13 +1,20 @@
+import { getMarketStatus } from "./_market-hours.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { imageBase64, imageMediaType } = req.body || {};
+    const { imageBase64, imageMediaType, market = "stockholm" } = req.body || {};
 
     if (!imageBase64 || !imageMediaType) {
       return res.status(400).json({ error: "Bild saknas" });
+    }
+
+    const marketStatus = getMarketStatus(market);
+    if (!marketStatus.isOpen) {
+      return res.status(423).json({ error: "MARKET_CLOSED", message: `${marketStatus.label} är stängd. AI-analysen kördes inte.`, marketStatus });
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -115,3 +122,4 @@ Svara ENDAST med ett giltigt JSON-objekt i exakt följande format:
     });
   }
 }
+

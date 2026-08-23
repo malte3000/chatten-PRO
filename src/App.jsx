@@ -77,6 +77,9 @@ export default function SannolikhetsTerminal() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [clock, setClock] = useState(new Date());
+  const [market, setMarket] = useState("stockholm");
+  const [marketStatus, setMarketStatus] = useState(null);
+  const [simulationMessage, setSimulationMessage] = useState(null);
   const rafRef = useRef(null);
 
   // Image analysis state
@@ -98,6 +101,38 @@ export default function SannolikhetsTerminal() {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshMarketStatus() {
+      try {
+        const response = await fetch(`/api/market-status?market=${market}`);
+        const data = await response.json();
+        if (active && response.ok) setMarketStatus(data);
+      } catch (error) {
+        console.error("Kunde inte hämta marknadsstatus", error);
+      }
+    }
+
+    setMarketStatus(null);
+    refreshMarketStatus();
+    const interval = setInterval(refreshMarketStatus, 60000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [market]);
+
+  function handleMarketChange(event) {
+    setMarket(event.target.value);
+    setAiAnalysis(null);
+    setNewsAnalysis(null);
+    setResult(null);
+    setAiError(null);
+    setNewsError(null);
+    setSimulationMessage(null);
+  }
 
   const momentumScore = { bullish: 66, neutral: 50, bearish: 34 }[momentum];
   const momentumLabel = { bullish: "BULLISH", neutral: "NEUTRAL", bearish: "BEARISH" }[momentum];
@@ -127,6 +162,10 @@ export default function SannolikhetsTerminal() {
 
   async function analyzeImage() {
   if (!imageBase64) return;
+  if (marketStatus && !marketStatus.isOpen) {
+    setAiError("Marknaden är stängd. Ingen AI-analys kördes.");
+    return;
+  }
 
   setAnalyzing(true);
   setAiError(null);
@@ -141,10 +180,17 @@ export default function SannolikhetsTerminal() {
       body: JSON.stringify({
         imageBase64,
         imageMediaType,
+        market,
       }),
     });
 
     const data = await response.json();
+
+    if (data?.marketStatus) setMarketStatus(data.marketStatus);
+    if (response.status === 423 && data?.error === "MARKET_CLOSED") {
+      setAiError(data.message);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(data?.message || data?.error || "API-fel");
@@ -207,6 +253,10 @@ export default function SannolikhetsTerminal() {
 
   async function analyzeNews() {
   if (!ticker.trim()) return;
+  if (marketStatus && !marketStatus.isOpen) {
+    setNewsError("Marknaden är stängd. Ingen AI-analys kördes.");
+    return;
+  }
 
   setNewsAnalyzing(true);
   setNewsError(null);
@@ -223,10 +273,17 @@ export default function SannolikhetsTerminal() {
       body: JSON.stringify({
         ticker: ticker.trim(),
         horizonText,
+        market,
       }),
     });
 
     const data = await response.json();
+
+    if (data?.marketStatus) setMarketStatus(data.marketStatus);
+    if (response.status === 423 && data?.error === "MARKET_CLOSED") {
+      setNewsError(data.message);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(
@@ -255,6 +312,13 @@ export default function SannolikhetsTerminal() {
   }
 
   function runSimulation() {
+    if (marketStatus && !marketStatus.isOpen) {
+      setResult(null);
+      setSimulationMessage("Marknaden är stängd. Ingen sannolikhetsberäkning kördes.");
+      return;
+    }
+
+    setSimulationMessage(null);
     setRunning(true);
     setResult(null);
     setProgress(0);
@@ -409,11 +473,36 @@ export default function SannolikhetsTerminal() {
           </div>
           <div className="text-right text-xs text-amber-700">
             <div className="flex items-center gap-2 justify-end">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-              <span>AKTIV</span>
+              <span className={`w-2 h-2 rounded-full ${marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-amber-800"}`}></span>
+              <span>{marketStatus?.isOpen ? "MARKNAD ÖPPEN" : "MARKNAD STÄNGD"}</span>
             </div>
             <div>{clock.toLocaleTimeString("sv-SE")}</div>
           </div>
+        </div>
+
+        <div className="border border-amber-800 p-4 mb-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <label htmlFor="market" className="block text-xs text-amber-700 tracking-widest mb-2">— VALD MARKNAD —</label>
+              <select
+                id="market"
+                value={market}
+                onChange={handleMarketChange}
+                className="border border-amber-700 bg-black px-3 py-2 text-sm text-amber-300 outline-none focus:border-amber-400"
+              >
+                <option value="stockholm">Nasdaq Stockholm</option>
+                <option value="usa">USA (Nasdaq/NYSE)</option>
+              </select>
+            </div>
+            <div className={`text-xs tracking-wider ${marketStatus?.isOpen ? "text-green-400" : "text-amber-600"}`}>
+              {!marketStatus ? "KONTROLLERAR STATUS..." : marketStatus.isOpen ? `● ÖPPEN · ${marketStatus.hours}` : `○ STÄNGD · ${marketStatus.hours}`}
+            </div>
+          </div>
+          {marketStatus && !marketStatus.isOpen && (
+            <p className="mt-3 text-xs text-amber-700 leading-relaxed">
+              AI-analyser och sannolikhetsberäkningar är pausade tills den valda marknaden öppnar.
+            </p>
+          )}
         </div>
 
         {/* Image analysis panel */}
@@ -468,7 +557,7 @@ export default function SannolikhetsTerminal() {
                 <div className="w-full md:w-44 space-y-2">
                   <button
                     onClick={analyzeImage}
-                    disabled={analyzing}
+                    disabled={analyzing || (marketStatus && !marketStatus.isOpen)}
                     className="w-full border border-amber-500 text-amber-300 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
                   >
                     {analyzing ? "ANALYSERAR GRAF..." : "ANALYSERA GRAF >"}
@@ -556,7 +645,7 @@ export default function SannolikhetsTerminal() {
             />
             <button
               onClick={analyzeNews}
-              disabled={newsAnalyzing || !ticker.trim()}
+               disabled={newsAnalyzing || !ticker.trim() || (marketStatus && !marketStatus.isOpen)}
               className="border border-amber-500 text-amber-300 px-4 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
             >
               {newsAnalyzing ? "SÖKER..." : "SÖK NYHETER >"}
@@ -720,11 +809,14 @@ export default function SannolikhetsTerminal() {
 
           <button
             onClick={runSimulation}
-            disabled={running}
+            disabled={running || (marketStatus && !marketStatus.isOpen)}
             className="mt-5 w-full border border-amber-500 text-amber-300 py-3 tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
           >
             {running ? `KÖR SIMULERING... ${Math.floor(progress)}%` : "KÖR SIMULERING >"}
           </button>
+          {simulationMessage && (
+            <div className="mt-3 border border-amber-900 p-2 text-xs text-amber-600">{simulationMessage}</div>
+          )}
           {running && (
             <div className="h-1 bg-amber-950 mt-2 overflow-hidden">
               <div className="h-full bg-amber-400 transition-all duration-75" style={{ width: `${progress}%` }} />
@@ -912,3 +1004,4 @@ function Field({ label, value, onChange, min, max, step, suffix }) {
     </div>
   );
 }
+
