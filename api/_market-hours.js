@@ -90,6 +90,18 @@ function calendar(market, year) {
 }
 
 export function getMarketStatus(marketId = "stockholm", now = new Date()) {
+  if (marketId === "off") {
+    return {
+      market: "off",
+      label: "Marknadskontroll av",
+      isOpen: true,
+      reason: "disabled",
+      localTime: null,
+      hours: "Alla tider",
+      earlyClose: false,
+    };
+  }
+
   const id = MARKETS[marketId] ? marketId : "stockholm";
   const market = MARKETS[id];
   const parts = zonedParts(now, market.timeZone);
