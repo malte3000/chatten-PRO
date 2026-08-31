@@ -461,6 +461,7 @@ export default function SannolikhetsTerminal() {
 
   const gaugeAngle = result ? -90 + (result.ensemble / 100) * 180 : -90;
   const patternMarker = getPatternMarker(aiAnalysis);
+  const marketControlOff = market === "off";
 
   return (
     <div className="min-h-screen bg-black text-amber-400 font-mono p-4 md:p-8">
@@ -473,8 +474,8 @@ export default function SannolikhetsTerminal() {
           </div>
           <div className="text-right text-xs text-amber-700">
             <div className="flex items-center gap-2 justify-end">
-              <span className={`w-2 h-2 rounded-full ${marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-amber-800"}`}></span>
-              <span>{marketStatus?.isOpen ? "MARKNAD ÖPPEN" : "MARKNAD STÄNGD"}</span>
+              <span className={`w-2 h-2 rounded-full ${marketControlOff ? "bg-amber-600" : marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-amber-800"}`}></span>
+              <span>{marketControlOff ? "MARKNADSKONTROLL AV" : marketStatus?.isOpen ? "MARKNAD ÖPPEN" : "MARKNAD STÄNGD"}</span>
             </div>
             <div>{clock.toLocaleTimeString("sv-SE")}</div>
           </div>
@@ -492,10 +493,17 @@ export default function SannolikhetsTerminal() {
               >
                 <option value="stockholm">Nasdaq Stockholm</option>
                 <option value="usa">USA (Nasdaq/NYSE)</option>
+                <option value="off">Av</option>
               </select>
             </div>
-            <div className={`text-xs tracking-wider ${marketStatus?.isOpen ? "text-green-400" : "text-amber-600"}`}>
-              {!marketStatus ? "KONTROLLERAR STATUS..." : marketStatus.isOpen ? `● ÖPPEN · ${marketStatus.hours}` : `○ STÄNGD · ${marketStatus.hours}`}
+            <div className={`text-xs tracking-wider ${marketControlOff ? "text-amber-500" : marketStatus?.isOpen ? "text-green-400" : "text-amber-600"}`}>
+              {marketControlOff
+                ? "○ AV · ALLA FUNKTIONER TILLGÄNGLIGA"
+                : !marketStatus
+                  ? "KONTROLLERAR STATUS..."
+                  : marketStatus.isOpen
+                    ? `● ÖPPEN · ${marketStatus.hours}`
+                    : `○ STÄNGD · ${marketStatus.hours}`}
             </div>
           </div>
           {marketStatus && !marketStatus.isOpen && (
