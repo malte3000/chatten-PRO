@@ -499,7 +499,7 @@ async function logSimulationTrade(simulationResult) {
 
   return;
 }
-      }
+      
       setProgress(p);
       rafRef.current = setTimeout(step, 40);
     };
