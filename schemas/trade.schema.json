@@ -273,7 +273,7 @@
       "description": "Tradens procentuella resultat."
     },
 
-    "result_R": {
+    "result_r": {
       "type": ["number", "null"],
       "description": "Tradens resultat uttryckt i R."
     },
