@@ -301,7 +301,11 @@
       "type": ["string", "null"],
       "description": "Efteranalys av traden."
     },
-
+"signal_inputs": {
+  "type": ["object", "null"],
+  "description": "Komplett snapshot av de inputs som användes när signalen skapades.",
+  "additionalProperties": true
+},
     "detected_errors": {
       "type": "array",
       "description": "Problem eller svagheter som upptäcktes efter traden.",
