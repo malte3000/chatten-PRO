@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trade.schema.json",
+  "title": "Signal Bot Trade",
+  "description": "Standardformat för alla signaler och trades i Sannolikhetsterminalen.",
+  "type": "object",
+  "additionalProperties": false,
+
+  "required": [
+    "trade_id",
+    "strategy_version",
+    "ticker",
+    "timestamp",
+    "signal",
+    "direction",
+    "confidence"
+  ],
+
+  "properties": {
+    "trade_id": {
+      "type": "string",
+      "description": "Unikt ID för signalen/traden."
+    },
+
+    "strategy_version": {
+      "type": "string",
+      "description": "Vilken version av strategin som skapade signalen.",
+      "examples": ["v0.1"]
+    },
+
+    "ticker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20,
+      "description": "Aktiens ticker.",
+      "examples": ["NVDA"]
+    },
+
+    "company_name": {
+      "type": ["string", "null"],
+      "description": "Bolagets namn.",
+      "examples": ["NVIDIA Corporation"]
+    },
+
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Tidpunkten då signalen skapades."
+    },
+
+    "signal": {
+      "type": "string",
+      "enum": ["BUY", "SELL", "NO_TRADE"],
+      "description": "Signalmotorns slutliga signal."
+    },
+
+    "direction": {
+      "type": "string",
+      "enum": ["LONG", "SHORT", "NONE"],
+      "description": "Tradens riktning."
+    },
+
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Signalens totala confidence."
+    },
+
+    "entry_price": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Planerat eller faktiskt entry-pris."
+    },
+
+    "stop_loss": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Stop loss-nivå."
+    },
+
+    "target": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Planerad target/take profit."
+    },
+
+    "exit_price": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Faktiskt exit-pris efter avslutad trade."
+    },
+
+    "risk_reward": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Planerad reward dividerat med risk."
+    },
+
+    "position_size": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Antal aktier eller motsvarande positionsstorlek."
+    },
+
+    "risk_percent": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Andel av kapitalet som riskeras i procent."
+    },
+
+    "risk_amount": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Kapitalbelopp som riskeras."
+    },
+
+    "technical_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "momentum_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "volume_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "volatility_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "trend": {
+      "type": ["string", "null"],
+      "enum": [
+        "bullish",
+        "bearish",
+        "neutral",
+        "unclear",
+        null
+      ]
+    },
+
+    "support": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0
+    },
+
+    "resistance": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0
+    },
+
+    "rvol": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Relative Volume."
+    },
+
+    "atr": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Average True Range."
+    },
+
+    "news_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "news_confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "catalyst_strength": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 10
+    },
+
+    "chart_pattern": {
+      "type": ["string", "null"],
+      "description": "Tekniskt mönster som identifierats."
+    },
+
+    "chart_confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+
+    "market_regime": {
+      "type": ["string", "null"],
+      "enum": [
+        "risk_on",
+        "risk_off",
+        "bullish",
+        "bearish",
+        "neutral",
+        "high_volatility",
+        "low_volatility",
+        "unclear",
+        null
+      ]
+    },
+
+    "sector_direction": {
+      "type": ["string", "null"],
+      "enum": [
+        "bullish",
+        "bearish",
+        "neutral",
+        "unclear",
+        null
+      ]
+    },
+
+    "index_direction": {
+      "type": ["string", "null"],
+      "enum": [
+        "bullish",
+        "bearish",
+        "neutral",
+        "unclear",
+        null
+      ]
+    },
+
+    "risk_engine_status": {
+      "type": ["string", "null"],
+      "enum": [
+        "APPROVED",
+        "REJECTED",
+        "NOT_EVALUATED",
+        null
+      ]
+    },
+
+    "risk_rejection_reason": {
+      "type": ["string", "null"],
+      "description": "Förklaring om Risk Engine nekade traden."
+    },
+
+    "trade_status": {
+      "type": ["string", "null"],
+      "enum": [
+        "SIGNAL_ONLY",
+        "REJECTED",
+        "PENDING",
+        "OPEN",
+        "CLOSED",
+        "CANCELLED",
+        "NO_TRADE",
+        null
+      ]
+    },
+
+    "result_percent": {
+      "type": ["number", "null"],
+      "description": "Tradens procentuella resultat."
+    },
+
+    "result_R": {
+      "type": ["number", "null"],
+      "description": "Tradens resultat uttryckt i R."
+    },
+
+    "winner": {
+      "type": ["boolean", "null"],
+      "description": "True om traden var vinnande, false om förlorande."
+    },
+
+    "exit_reason": {
+      "type": ["string", "null"],
+      "enum": [
+        "TARGET",
+        "STOP_LOSS",
+        "MANUAL",
+        "TIME_EXIT",
+        "SIGNAL_REVERSAL",
+        "END_OF_DAY",
+        "OTHER",
+        null
+      ]
+    },
+
+    "post_trade_analysis": {
+      "type": ["string", "null"],
+      "description": "Efteranalys av traden."
+    },
+
+    "detected_errors": {
+      "type": "array",
+      "description": "Problem eller svagheter som upptäcktes efter traden.",
+      "items": {
+        "type": "string"
+      }
+    },
+
+    "learning_tags": {
+      "type": "array",
+      "description": "Taggar som Learning Engine kan använda för att gruppera liknande trades.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  }
+}
