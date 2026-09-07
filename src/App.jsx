@@ -565,7 +565,25 @@ async function logSimulationTrade(simulationResult) {
             </p>
           )}
         </div>
+{/* Ticker / stock selector */}
+<div className="border border-amber-800 p-4 mb-6">
+  <div className="text-xs text-amber-700 mb-3 tracking-widest">
+    — AKTIE / TICKER —
+  </div>
 
+  <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+    Ange vilken aktie analysen gäller. Samma ticker används för signal,
+    nyheter och loggning.
+  </p>
+
+  <input
+    type="text"
+    value={ticker}
+    onChange={(e) => setTicker(e.target.value)}
+    placeholder="t.ex. NVDA, AAPL, EVO"
+    className="w-full bg-black border border-amber-900 focus:border-amber-500 text-amber-300 px-3 py-2 outline-none text-sm"
+  />
+</div>
         {/* Image analysis panel */}
         <div className="border border-amber-800 p-4 mb-6">
           <div className="text-xs text-amber-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
@@ -696,14 +714,8 @@ async function logSimulationTrade(simulationResult) {
             just den aktien under din valda hållperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) — bra för
             hävstångscertifikat där riktningens säkerhet spelar större roll än rörelsens storlek.
           </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value)}
-              placeholder="t.ex. NVDA, Seagate, SPG"
-              className="flex-1 bg-black border border-amber-900 focus:border-amber-500 text-amber-300 px-2 py-2 outline-none text-sm"
-            />
+          <div>
+            
             <button
               onClick={analyzeNews}
                disabled={newsAnalyzing || !ticker.trim() || (marketStatus && !marketStatus.isOpen)}
