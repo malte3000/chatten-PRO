@@ -13,6 +13,11 @@ function roundScore(value) {
   );
 }
 
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function getSignal(ensemble) {
   if (ensemble >= 60) {
     return {
@@ -30,8 +35,6 @@ function getSignal(ensemble) {
     };
   }
 
-  // Confidence här betyder hur starkt systemet anser
-  // att NO_TRADE är rätt beslut.
   const noTradeConfidence =
     100 - Math.abs(ensemble - 50) * 2;
 
@@ -105,11 +108,17 @@ export function buildTradeRecord({
   ticker,
   result,
   price,
+  vol,
+  drift,
+  horizonAmount,
+  horizonUnit,
   momentum,
   momentumScore,
+  thesis,
   aiAnalysis,
   newsAnalysis,
   market,
+  marketStatus,
 }) {
   const cleanTicker = ticker.trim().toUpperCase();
 
@@ -151,7 +160,7 @@ export function buildTradeRecord({
     entry_price:
       decision.signal === "NO_TRADE"
         ? null
-        : Number(price),
+        : numberOrNull(price),
 
     stop_loss: null,
     target: null,
@@ -208,6 +217,73 @@ export function buildTradeRecord({
     exit_reason: null,
 
     post_trade_analysis: null,
+
+    signal_inputs: {
+      simulator_version: "v2.0",
+
+      market,
+      market_status: marketStatus
+        ? {
+            is_open: Boolean(marketStatus.isOpen),
+            hours: marketStatus.hours || null,
+          }
+        : null,
+
+      current_price: numberOrNull(price),
+
+      volatility_annual_pct: numberOrNull(vol),
+      drift_annual_pct: numberOrNull(drift),
+
+      horizon: {
+        amount: numberOrNull(horizonAmount),
+        unit: horizonUnit || null,
+        label: result.horizonLabel || null,
+      },
+
+      thesis: thesis || null,
+      momentum: momentum || null,
+      momentum_score: roundScore(momentumScore),
+
+      monte_carlo: {
+        probability_up: roundScore(result.mcProb),
+        simulations: numberOrNull(result.nsim),
+        big_up_pct: roundScore(result.bigUpPct),
+        big_down_pct: roundScore(result.bigDownPct),
+      },
+
+      ai: {
+        score:
+          typeof result.aiScore === "number"
+            ? roundScore(result.aiScore)
+            : null,
+
+        amd_confidence:
+          typeof result.amdConfidence === "number"
+            ? roundScore(result.amdConfidence)
+            : null,
+
+        amd_phase: result.amdPhase || null,
+        amd_status: result.amdStatus || null,
+
+        analysis: aiAnalysis || null,
+      },
+
+      news: {
+        score:
+          typeof result.newsScore === "number"
+            ? roundScore(result.newsScore)
+            : null,
+
+        confidence: newsConfidence,
+
+        analysis: newsAnalysis || null,
+      },
+
+      ensemble: {
+        score: roundScore(result.ensemble),
+        weights: result.weights || null,
+      },
+    },
 
     detected_errors: [],
 
