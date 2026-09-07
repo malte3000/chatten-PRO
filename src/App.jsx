@@ -471,27 +471,34 @@ async function logSimulationTrade(simulationResult) {
     let p = 0;
     const step = () => {
       p += 6 + Math.random() * 10;
-      if (p >= 100) {
-        setProgress(100);
-        setRunning(false);
-        setResult({
-          mcProb,
-          momentumScore,
-          aiScore,
-          newsScore,
-          amdConfidence: hasAmd ? aiAnalysis.amd_confidence : null,
-          amdPhase: hasAi ? aiAnalysis.amd_phase : null,
-          amdStatus,
-          ensemble,
-          weights,
-          histogram,
-          bigUpPct: (bigUp / NSIM) * 100,
-          bigDownPct: (bigDown / NSIM) * 100,
-          nsim: NSIM,
-          horizonLabel: `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`,
-          thesis,
-        });
-        return;
+     if (p >= 100) {
+  setProgress(100);
+  setRunning(false);
+
+  const simulationResult = {
+    mcProb,
+    momentumScore,
+    aiScore,
+    newsScore,
+    amdConfidence: hasAmd ? aiAnalysis.amd_confidence : null,
+    amdPhase: hasAi ? aiAnalysis.amd_phase : null,
+    amdStatus,
+    ensemble,
+    weights,
+    histogram,
+    bigUpPct: (bigUp / NSIM) * 100,
+    bigDownPct: (bigDown / NSIM) * 100,
+    nsim: NSIM,
+    horizonLabel: `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`,
+    thesis,
+  };
+
+  setResult(simulationResult);
+
+  void logSimulationTrade(simulationResult);
+
+  return;
+}
       }
       setProgress(p);
       rafRef.current = setTimeout(step, 40);
