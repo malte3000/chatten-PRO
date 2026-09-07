@@ -212,7 +212,7 @@ export function buildTradeRecord({
         : "SIGNAL_ONLY",
 
     result_percent: null,
-    result_R: null,
+    result_r: null,
     winner: null,
     exit_reason: null,
 
