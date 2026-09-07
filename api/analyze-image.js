@@ -1,6 +1,12 @@
+import { isAuthenticated } from "./_auth.js";
 import { getMarketStatus } from "./_market-hours.js";
-
 export default async function handler(req, res) {
+    if (!isAuthenticated(req)) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "Du måste vara inloggad.",
+    });
+  }
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
