@@ -311,7 +311,52 @@ export default function SannolikhetsTerminal() {
     setNewsAnalysis(null);
     setNewsError(null);
   }
+async function logSimulationTrade(simulationResult) {
+  // Vi loggar inte om vi inte vet vilken aktie signalen gäller.
+  if (!ticker.trim()) {
+    console.warn("Trade logging skipped: ticker saknas.");
+    return;
+  }
 
+  try {
+    const trade = buildTradeRecord({
+      ticker,
+      result: simulationResult,
+      price,
+      vol,
+      drift,
+      horizonAmount,
+      horizonUnit,
+      momentum,
+      momentumScore,
+      thesis,
+      aiAnalysis,
+      newsAnalysis,
+      market,
+      marketStatus,
+    });
+
+    const savedTrade = await saveTrade(trade);
+
+    if (!savedTrade.success) {
+      console.error(
+        "Automatic trade logging failed:",
+        savedTrade.error
+      );
+      return;
+    }
+
+    console.log(
+      "Trade automatically logged:",
+      savedTrade.trade
+    );
+  } catch (error) {
+    console.error(
+      "Could not build trade record:",
+      error
+    );
+  }
+}
   function runSimulation() {
     if (marketStatus && !marketStatus.isOpen) {
       setResult(null);
