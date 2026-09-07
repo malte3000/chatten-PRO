@@ -1,4 +1,94 @@
+import crypto from "crypto";
+
+function getCookies(req) {
+  const cookieHeader = req.headers.cookie || "";
+
+  return cookieHeader.split(";").reduce((cookies, cookie) => {
+    const separatorIndex = cookie.indexOf("=");
+
+    if (separatorIndex === -1) return cookies;
+
+    const key = cookie.slice(0, separatorIndex).trim();
+    const value = cookie.slice(separatorIndex + 1).trim();
+
+    cookies[key] = value;
+
+    return cookies;
+  }, {});
+}
+
+function verifySessionToken(token, secret) {
+  if (!token || !secret) {
+    return false;
+  }
+
+  try {
+    const parts = token.split(".");
+
+    if (parts.length !== 2) {
+      return false;
+    }
+
+    const [encodedPayload, receivedSignature] = parts;
+
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(encodedPayload)
+      .digest("base64url");
+
+    const receivedBuffer = Buffer.from(receivedSignature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    if (receivedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    const validSignature = crypto.timingSafeEqual(
+      receivedBuffer,
+      expectedBuffer
+    );
+
+    if (!validSignature) {
+      return false;
+    }
+
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString("utf8")
+    );
+
+    if (!payload.exp || Date.now() > payload.exp) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default async function handler(req, res) {
+  const loginPassword = process.env.APP_LOGIN_PASSWORD;
+
+  if (!loginPassword) {
+    return res.status(500).json({
+      error: "Login är inte konfigurerat på servern",
+    });
+  }
+
+  // ---------------------------------
+  // KONTROLLERA INLOGGNING
+  // ---------------------------------
+
+  const cookies = getCookies(req);
+  const sessionToken = cookies.chatten_pro_session;
+
+  if (!verifySessionToken(sessionToken, loginPassword)) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "Du måste vara inloggad.",
+    });
+  }
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 
@@ -16,8 +106,9 @@ export default async function handler(req, res) {
 
   try {
     // ---------------------------------
-    // POST = SPARA EN NY TRADE
+    // POST = SPARA NY TRADE
     // ---------------------------------
+
     if (req.method === "POST") {
       const trade =
         typeof req.body === "string"
@@ -80,6 +171,7 @@ export default async function handler(req, res) {
     // ---------------------------------
     // GET = HÄMTA SENASTE TRADES
     // ---------------------------------
+
     if (req.method === "GET") {
       const response = await fetch(
         `${supabaseUrl}/rest/v1/trades?select=*&order=timestamp.desc&limit=100`,
