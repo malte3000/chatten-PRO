@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
-
+import { saveTrade } from "./tradeLogger.js";
+import { buildTradeRecord } from "./tradePolicy.js";
 const UNIT_LABELS = { minuter: "minuter", timmar: "timmar" };
 const UNIT_TO_TRADING_DAYS = { minuter: 1 / 390, timmar: 1 / 6.5 };
 const HORIZON_PRESETS = [
