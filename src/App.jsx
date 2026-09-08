@@ -509,7 +509,7 @@ async function logSimulationTrade(simulationResult) {
 
   useEffect(() => () => clearTimeout(rafRef.current), []);
 
-  const verdictColor = (v) => (v >= 55 ? "text-green-400" : v <= 45 ? "text-red-400" : "text-amber-400");
+  const verdictColor = (v) => (v >= 55 ? "text-green-400" : v <= 45 ? "text-red-400" : "text-cyan-400");
   const verdictText = (v) =>
     v >= 60 ? "ÖVERVIKT UPP" : v >= 52 ? "SVAG ÖVERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG ÖVERVIKT NER" : "ÖVERVIKT NER";
 
@@ -521,36 +521,36 @@ async function logSimulationTrade(simulationResult) {
     <div className="min-h-screen bg-transparent text-slate-200 font-mono p-4 md:p-8">
       <div className="max-w-3xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-amber-800 pb-3 mb-6">
+        <div className="flex items-center justify-between border-b border-cyan-800 pb-3 mb-6">
           <div>
-            <div className="text-xs tracking-widest text-amber-700">SIMULATOR // v2.0</div>
-            <h1 className="text-xl md:text-2xl tracking-wider text-amber-300 font-bold">SANNOLIKHETSTERMINAL</h1>
+            <div className="text-xs tracking-widest text-cyan-700">SIMULATOR // v2.0</div>
+            <h1 className="text-xl md:text-2xl tracking-wider text-cyan-300 font-bold">SANNOLIKHETSTERMINAL</h1>
           </div>
-          <div className="text-right text-xs text-amber-700">
+          <div className="text-right text-xs text-cyan-700">
             <div className="flex items-center gap-2 justify-end">
-              <span className={`w-2 h-2 rounded-full ${marketControlOff ? "bg-amber-600" : marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-amber-800"}`}></span>
+              <span className={`w-2 h-2 rounded-full ${marketControlOff ? "bg-cyan-600" : marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-cyan-800"}`}></span>
               <span>{marketControlOff ? "MARKNADSKONTROLL AV" : marketStatus?.isOpen ? "MARKNAD ÖPPEN" : "MARKNAD STÄNGD"}</span>
             </div>
             <div>{clock.toLocaleTimeString("sv-SE")}</div>
           </div>
         </div>
 
-        <div className="border border-amber-800 p-4 mb-6">
+        <div className="border border-cyan-800 p-4 mb-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <label htmlFor="market" className="block text-xs text-amber-700 tracking-widest mb-2">— VALD MARKNAD —</label>
+              <label htmlFor="market" className="block text-xs text-cyan-700 tracking-widest mb-2">— VALD MARKNAD —</label>
               <select
                 id="market"
                 value={market}
                 onChange={handleMarketChange}
-                className="border border-amber-700 bg-black px-3 py-2 text-sm text-amber-300 outline-none focus:border-amber-400"
+                className="border border-cyan-700 bg-black px-3 py-2 text-sm text-cyan-300 outline-none focus:border-cyan-400"
               >
                 <option value="stockholm">Nasdaq Stockholm</option>
                 <option value="usa">USA (Nasdaq/NYSE)</option>
                 <option value="off">Av</option>
               </select>
             </div>
-            <div className={`text-xs tracking-wider ${marketControlOff ? "text-amber-500" : marketStatus?.isOpen ? "text-green-400" : "text-amber-600"}`}>
+            <div className={`text-xs tracking-wider ${marketControlOff ? "text-cyan-500" : marketStatus?.isOpen ? "text-green-400" : "text-cyan-600"}`}>
               {marketControlOff
                 ? "○ AV · ALLA FUNKTIONER TILLGÄNGLIGA"
                 : !marketStatus
@@ -561,18 +561,18 @@ async function logSimulationTrade(simulationResult) {
             </div>
           </div>
           {marketStatus && !marketStatus.isOpen && (
-            <p className="mt-3 text-xs text-amber-700 leading-relaxed">
+            <p className="mt-3 text-xs text-cyan-700 leading-relaxed">
               AI-analyser och sannolikhetsberäkningar är pausade tills den valda marknaden öppnar.
             </p>
           )}
         </div>
 {/* Ticker / stock selector */}
-<div className="border border-amber-800 p-4 mb-6">
-  <div className="text-xs text-amber-700 mb-3 tracking-widest">
+<div className="border border-cyan-800 p-4 mb-6">
+  <div className="text-xs text-cyan-700 mb-3 tracking-widest">
     — AKTIE / TICKER —
   </div>
 
-  <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+  <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
     Ange vilken aktie analysen gäller. Samma ticker används för signal,
     nyheter och loggning.
   </p>
@@ -582,28 +582,28 @@ async function logSimulationTrade(simulationResult) {
     value={ticker}
     onChange={(e) => setTicker(e.target.value)}
     placeholder="t.ex. NVDA, AAPL, EVO"
-    className="w-full bg-black border border-amber-900 focus:border-amber-500 text-amber-300 px-3 py-2 outline-none text-sm"
+    className="w-full bg-black border border-cyan-900 focus:border-cyan-500 text-cyan-300 px-3 py-2 outline-none text-sm"
   />
 </div>
         {/* Image analysis panel */}
-        <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
-          <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+        <div className="border border-cyan-800 p-4 mb-6">
+          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
+          <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
             Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden, markerar identifierade tekniska
             mönster direkt i grafen och fyller i volatilitet och momentum åt dig nedan.
           </p>
 
           {!imagePreview && (
-            <label className="block border border-dashed border-amber-800 hover:border-amber-500 p-6 text-center cursor-pointer transition-colors">
+            <label className="block border border-dashed border-cyan-800 hover:border-cyan-500 p-6 text-center cursor-pointer transition-colors">
               <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
-              <span className="text-xs text-amber-600 tracking-widest">+ VÄLJ BILD PÅ KURSGRAF</span>
+              <span className="text-xs text-cyan-600 tracking-widest">+ VÄLJ BILD PÅ KURSGRAF</span>
             </label>
           )}
 
           {imagePreview && (
             <div className="space-y-3">
               <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-start">
-                <div className="relative flex-1 min-w-0 overflow-hidden border border-amber-800 bg-black">
+                <div className="relative flex-1 min-w-0 overflow-hidden border border-cyan-800 bg-black">
                   <img src={imagePreview} alt="Uppladdad graf" className="block w-full max-h-80 object-contain" />
                   {patternMarker && (
                     <div className="absolute inset-0 pointer-events-none" aria-label={`AI-markerat mönster: ${patternMarker.label}`}>
@@ -638,13 +638,13 @@ async function logSimulationTrade(simulationResult) {
                   <button
                     onClick={analyzeImage}
                     disabled={analyzing || (marketStatus && !marketStatus.isOpen)}
-                    className="w-full border border-amber-500 text-amber-300 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+                    className="w-full border border-cyan-500 text-cyan-300 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
                   >
                     {analyzing ? "ANALYSERAR GRAF..." : "ANALYSERA GRAF >"}
                   </button>
                   <button
                     onClick={clearImage}
-                    className="w-full border border-amber-900 text-amber-700 py-2 text-xs tracking-widest hover:border-amber-600 transition-colors"
+                    className="w-full border border-cyan-900 text-cyan-700 py-2 text-xs tracking-widest hover:border-cyan-600 transition-colors"
                   >
                     TA BORT BILD
                   </button>
@@ -654,49 +654,49 @@ async function logSimulationTrade(simulationResult) {
               {aiError && <div className="text-xs text-red-400 border border-red-900 p-2">{aiError}</div>}
 
               {aiAnalysis && (
-                <div className="border border-amber-900 p-3 text-xs space-y-1.5">
-                  <div className="text-amber-300">
-                    TREND: <span className="text-amber-100">{momentumLabel}</span> · AI-SANNOLIKHET UPP:{" "}
-                    <span className="text-amber-100">{aiAnalysis.confidence}%</span>
+                <div className="border border-cyan-900 p-3 text-xs space-y-1.5">
+                  <div className="text-cyan-300">
+                    TREND: <span className="text-cyan-100">{momentumLabel}</span> · AI-SANNOLIKHET UPP:{" "}
+                    <span className="text-cyan-100">{aiAnalysis.confidence}%</span>
                   </div>
                   {aiAnalysis.reasoning && (
-                    <div className="text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">MOTIVERING: </span>
+                    <div className="text-cyan-500 leading-relaxed">
+                      <span className="text-cyan-700">MOTIVERING: </span>
                       {aiAnalysis.reasoning}
                     </div>
                   )}
-                  {aiAnalysis.commentary && <div className="text-amber-600 leading-relaxed">{aiAnalysis.commentary}</div>}
+                  {aiAnalysis.commentary && <div className="text-cyan-600 leading-relaxed">{aiAnalysis.commentary}</div>}
                   {aiAnalysis.chart_type && (
-                    <div className="text-amber-800">Graftyp identifierad: {aiAnalysis.chart_type}</div>
+                    <div className="text-cyan-800">Graftyp identifierad: {aiAnalysis.chart_type}</div>
                   )}
                   {aiAnalysis.premarket_detected && (
-                    <div className="border border-amber-900 bg-amber-950/40 px-2 py-1.5 text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">FÖRHANDEL/EFTERHANDEL UPPTÄCKT</span>
+                    <div className="border border-cyan-900 bg-cyan-950/40 px-2 py-1.5 text-cyan-500 leading-relaxed">
+                      <span className="text-cyan-700">FÖRHANDEL/EFTERHANDEL UPPTÄCKT</span>
                       {typeof aiAnalysis.premarket_move_pct === "number" && (
                         <span> ({aiAnalysis.premarket_move_pct > 0 ? "+" : ""}{aiAnalysis.premarket_move_pct}%)</span>
                       )}
                       {aiAnalysis.premarket_notes && <div>{aiAnalysis.premarket_notes}</div>}
-                      <div className="text-amber-800">
+                      <div className="text-cyan-800">
                         Endast informativt — vägs inte in i sannolikheten eftersom förhandel har tunnare volym.
                       </div>
                     </div>
                   )}
                   {aiAnalysis.candlestick_pattern && aiAnalysis.candlestick_reasoning && (
-                    <div className="text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">CANDLESTICK-MÖNSTER ({aiAnalysis.candlestick_pattern}): </span>
+                    <div className="text-cyan-500 leading-relaxed">
+                      <span className="text-cyan-700">CANDLESTICK-MÖNSTER ({aiAnalysis.candlestick_pattern}): </span>
                       {aiAnalysis.candlestick_reasoning}
                     </div>
                   )}
                   {aiAnalysis.amd_reasoning && (
-                    <div className="text-amber-500 leading-relaxed">
-                      <span className="text-amber-700">
+                    <div className="text-cyan-500 leading-relaxed">
+                      <span className="text-cyan-700">
                         AMD ({aiAnalysis.amd_phase === "unclear" || !aiAnalysis.amd_phase ? "otydligt" : aiAnalysis.amd_phase}):{" "}
                       </span>
                       {aiAnalysis.amd_reasoning}
-                      <span className="text-amber-800"> — används endast om den håller med övriga metoder.</span>
+                      <span className="text-cyan-800"> — används endast om den håller med övriga metoder.</span>
                     </div>
                   )}
-                  <div className="text-amber-800 pt-1 border-t border-amber-900">
+                  <div className="text-cyan-800 pt-1 border-t border-cyan-900">
                     Automatiskt ifyllt:{" "}
                     {aiAnalysis.price_detected ? `pris ${aiAnalysis.price_detected}, ` : "pris ej avläsbart (fyll i manuellt), "}
                     volatilitet, drift och momentum. Justera valfritt fält nedan innan du kör simuleringen.
@@ -708,9 +708,9 @@ async function logSimulationTrade(simulationResult) {
         </div>
 
         {/* News analysis panel */}
-        <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— NYHETSANALYS FÖR AKTIE (VALFRITT) —</div>
-          <p className="text-xs text-amber-600 mb-3 leading-relaxed">
+        <div className="border border-cyan-800 p-4 mb-6">
+          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— NYHETSANALYS FÖR AKTIE (VALFRITT) —</div>
+          <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
             Skriv in en ticker/bolagsnamn. AI:n söker efter aktuella nyheter med trolig, relativt precis påverkan på
             just den aktien under din valda hållperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) — bra för
             hävstångscertifikat där riktningens säkerhet spelar större roll än rörelsens storlek.
@@ -720,7 +720,7 @@ async function logSimulationTrade(simulationResult) {
             <button
               onClick={analyzeNews}
                disabled={newsAnalyzing || !ticker.trim() || (marketStatus && !marketStatus.isOpen)}
-              className="border border-amber-500 text-amber-300 px-4 py-2 text-xs tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+              className="border border-cyan-500 text-cyan-300 px-4 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
             >
               {newsAnalyzing ? "SÖKER..." : "SÖK NYHETER >"}
             </button>
@@ -729,38 +729,38 @@ async function logSimulationTrade(simulationResult) {
           {newsError && <div className="text-xs text-red-400 border border-red-900 p-2 mt-3">{newsError}</div>}
 
           {newsAnalysis && (
-            <div className="border border-amber-900 p-3 text-xs space-y-1.5 mt-3">
+            <div className="border border-cyan-900 p-3 text-xs space-y-1.5 mt-3">
               <div className="flex justify-between items-start">
-                <div className="text-amber-300">
+                <div className="text-cyan-300">
                   RIKTNING:{" "}
-                  <span className="text-amber-100">
+                  <span className="text-cyan-100">
                     {newsAnalysis.direction === "upp" ? "UPP" : newsAnalysis.direction === "ner" ? "NER" : "OKLART"}
                   </span>{" "}
-                  · SÄKERHET: <span className="text-amber-100">{newsAnalysis.confidence}%</span>
+                  · SÄKERHET: <span className="text-cyan-100">{newsAnalysis.confidence}%</span>
                 </div>
-                <button onClick={clearNews} className="text-amber-800 hover:text-amber-500 text-xs">
+                <button onClick={clearNews} className="text-cyan-800 hover:text-cyan-500 text-xs">
                   RENSA
                 </button>
               </div>
               {newsAnalysis.magnitude_note && (
-                <div className="text-amber-600 leading-relaxed">
-                  <span className="text-amber-700">FÖRVÄNTAD STORLEK: </span>
+                <div className="text-cyan-600 leading-relaxed">
+                  <span className="text-cyan-700">FÖRVÄNTAD STORLEK: </span>
                   {newsAnalysis.magnitude_note}
                 </div>
               )}
               {newsAnalysis.reasoning && (
-                <div className="text-amber-500 leading-relaxed">
-                  <span className="text-amber-700">MOTIVERING: </span>
+                <div className="text-cyan-500 leading-relaxed">
+                  <span className="text-cyan-700">MOTIVERING: </span>
                   {newsAnalysis.reasoning}
                 </div>
               )}
               {Array.isArray(newsAnalysis.key_news) && newsAnalysis.key_news.length > 0 && (
-                <ul className="text-amber-600 leading-relaxed list-disc list-inside space-y-0.5">
+                <ul className="text-cyan-600 leading-relaxed list-disc list-inside space-y-0.5">
                   {newsAnalysis.key_news.map((n, i) => (
                     <li key={i}>
                       <span
                         className={
-                          n.impact === "positiv" ? "text-green-400" : n.impact === "negativ" ? "text-red-400" : "text-amber-500"
+                          n.impact === "positiv" ? "text-green-400" : n.impact === "negativ" ? "text-red-400" : "text-cyan-500"
                         }
                       >
                         [{n.impact}]
@@ -771,7 +771,7 @@ async function logSimulationTrade(simulationResult) {
                 </ul>
               )}
               {newsAnalysis.direction === "oklart" && (
-                <div className="text-amber-800 pt-1 border-t border-amber-900">
+                <div className="text-cyan-800 pt-1 border-t border-cyan-900">
                   Inga tydliga bolagsspecifika nyheter hittades — vägs därför inte in i simuleringen.
                 </div>
               )}
@@ -780,8 +780,8 @@ async function logSimulationTrade(simulationResult) {
         </div>
 
         {/* Input panel */}
-        <div className="border border-amber-800 p-4 mb-6">
-          <div className="text-xs text-amber-700 mb-3 tracking-widest">— INDATA —</div>
+        <div className="border border-cyan-800 p-4 mb-6">
+          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— INDATA —</div>
           <div className="grid grid-cols-3 gap-4">
             <Field label="PRIS" value={price} onChange={setPrice} min={1} step={1} suffix="" />
             <Field label="VOLATILITET" value={vol} onChange={setVol} min={1} max={150} step={1} suffix="%" />
@@ -789,7 +789,7 @@ async function logSimulationTrade(simulationResult) {
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-amber-700 mb-2 tracking-widest">HÅLLPERIOD</div>
+            <div className="text-xs text-cyan-700 mb-2 tracking-widest">HÅLLPERIOD</div>
             <div className="flex gap-2 mb-2 flex-wrap">
               {HORIZON_PRESETS.map((h) => {
                 const active = horizonAmount === h.amount && horizonUnit === h.unit;
@@ -801,7 +801,7 @@ async function logSimulationTrade(simulationResult) {
                       setHorizonUnit(h.unit);
                     }}
                     className={`border px-2 py-2 text-xs tracking-widest transition-colors ${
-                      active ? "border-amber-400 bg-amber-950 text-amber-300" : "border-amber-900 text-amber-700 hover:border-amber-600"
+                      active ? "border-cyan-400 bg-cyan-950 text-cyan-300" : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
                     }`}
                   >
                     {h.label}
@@ -810,20 +810,20 @@ async function logSimulationTrade(simulationResult) {
               })}
             </div>
             <div className="flex gap-2">
-              <div className="flex items-center border border-amber-900 focus-within:border-amber-500 flex-1">
+              <div className="flex items-center border border-cyan-900 focus-within:border-cyan-500 flex-1">
                 <input
                   type="number"
                   value={horizonAmount}
                   min={0.1}
                   step={0.1}
                   onChange={(e) => setHorizonAmount(Math.max(0.1, Number(e.target.value)))}
-                  className="w-full bg-black text-amber-300 px-2 py-2 outline-none text-sm"
+                  className="w-full bg-black text-cyan-300 px-2 py-2 outline-none text-sm"
                 />
               </div>
               <select
                 value={horizonUnit}
                 onChange={(e) => setHorizonUnit(e.target.value)}
-                className="border border-amber-900 bg-black text-amber-300 px-2 py-2 text-sm outline-none focus:border-amber-500"
+                className="border border-cyan-900 bg-black text-cyan-300 px-2 py-2 text-sm outline-none focus:border-cyan-500"
               >
                 {Object.entries(UNIT_LABELS).map(([key, label]) => (
                   <option key={key} value={key}>
@@ -832,13 +832,13 @@ async function logSimulationTrade(simulationResult) {
                 ))}
               </select>
             </div>
-            <div className="text-xs text-amber-800 mt-1">
+            <div className="text-xs text-cyan-800 mt-1">
               Egen hållperiod ner till enstaka minuter, för daytrading (upp till en handelsdag, ca 6,5h).
             </div>
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-amber-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÅN AI-ANALYS)</div>
+            <div className="text-xs text-cyan-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÅN AI-ANALYS)</div>
             <div className="flex gap-2">
               {["bearish", "neutral", "bullish"].map((m) => (
                 <button
@@ -846,8 +846,8 @@ async function logSimulationTrade(simulationResult) {
                   onClick={() => setMomentum(m)}
                   className={`flex-1 border px-2 py-2 text-xs tracking-widest transition-colors ${
                     momentum === m
-                      ? "border-amber-400 bg-amber-950 text-amber-300"
-                      : "border-amber-900 text-amber-700 hover:border-amber-600"
+                      ? "border-cyan-400 bg-cyan-950 text-cyan-300"
+                      : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
                   }`}
                 >
                   {m === "bearish" ? "NEDÅT" : m === "neutral" ? "SIDLED" : "UPPÅT"}
@@ -857,7 +857,7 @@ async function logSimulationTrade(simulationResult) {
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-amber-700 mb-2 tracking-widest">DIN TES: BULL ELLER BEAR?</div>
+            <div className="text-xs text-cyan-700 mb-2 tracking-widest">DIN TES: BULL ELLER BEAR?</div>
             <div className="flex gap-2">
               {["bull", "bear"].map((t) => (
                 <button
@@ -868,14 +868,14 @@ async function logSimulationTrade(simulationResult) {
                       ? t === "bull"
                         ? "border-green-500 bg-green-950 text-green-300"
                         : "border-red-500 bg-red-950 text-red-300"
-                      : "border-amber-900 text-amber-700 hover:border-amber-600"
+                      : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
                   }`}
                 >
                   {t === "bull" ? "BULL (TROR PÅ UPPGÅNG)" : "BEAR (TROR PÅ NEDGÅNG)"}
                 </button>
               ))}
             </div>
-            <div className="text-xs text-amber-800 mt-1">
+            <div className="text-xs text-cyan-800 mt-1">
               Bara en markering av vad du hoppas/tror på — påverkar inte AI:ns analys, bara hur resultatet
               lyfts fram nedan.
             </div>
@@ -884,24 +884,24 @@ async function logSimulationTrade(simulationResult) {
           <button
             onClick={runSimulation}
             disabled={running || (marketStatus && !marketStatus.isOpen)}
-            className="mt-5 w-full border border-amber-500 text-amber-300 py-3 tracking-widest hover:bg-amber-950 disabled:opacity-50 transition-colors"
+            className="mt-5 w-full border border-cyan-500 text-cyan-300 py-3 tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
           >
             {running ? `KÖR SIMULERING... ${Math.floor(progress)}%` : "KÖR SIMULERING >"}
           </button>
           {simulationMessage && (
-            <div className="mt-3 border border-amber-900 p-2 text-xs text-amber-600">{simulationMessage}</div>
+            <div className="mt-3 border border-cyan-900 p-2 text-xs text-cyan-600">{simulationMessage}</div>
           )}
           {running && (
-            <div className="h-1 bg-amber-950 mt-2 overflow-hidden">
-              <div className="h-full bg-amber-400 transition-all duration-75" style={{ width: `${progress}%` }} />
+            <div className="h-1 bg-cyan-950 mt-2 overflow-hidden">
+              <div className="h-full bg-cyan-400 transition-all duration-75" style={{ width: `${progress}%` }} />
             </div>
           )}
         </div>
 
         {/* Results */}
         {result && (
-          <div className="border border-amber-800 p-4 space-y-6">
-            <div className="text-xs text-amber-700 tracking-widest">
+          <div className="border border-cyan-800 p-4 space-y-6">
+            <div className="text-xs text-cyan-700 tracking-widest">
               — RESULTAT ({result.nsim.toLocaleString("sv-SE")} SIMULERADE UTFALL) —
             </div>
 
@@ -940,11 +940,11 @@ async function logSimulationTrade(simulationResult) {
               <div className="flex gap-6 mt-3 text-sm">
                 <div className={`text-center ${result.thesis === "bull" ? "opacity-100" : "opacity-50"}`}>
                   <div className="text-green-400 font-bold">{result.ensemble.toFixed(1)}%</div>
-                  <div className="text-amber-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " ← DIN TES" : ""}</div>
+                  <div className="text-cyan-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " ← DIN TES" : ""}</div>
                 </div>
                 <div className={`text-center ${result.thesis === "bear" ? "opacity-100" : "opacity-50"}`}>
                   <div className="text-red-400 font-bold">{(100 - result.ensemble).toFixed(1)}%</div>
-                  <div className="text-amber-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " ← DIN TES" : ""}</div>
+                  <div className="text-cyan-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " ← DIN TES" : ""}</div>
                 </div>
               </div>
               <div
@@ -953,7 +953,7 @@ async function logSimulationTrade(simulationResult) {
                     ? "border-green-900 text-green-400"
                     : (result.thesis === "bull" ? result.ensemble : 100 - result.ensemble) <= 45
                     ? "border-red-900 text-red-400"
-                    : "border-amber-900 text-amber-600"
+                    : "border-cyan-900 text-cyan-600"
                 }`}
               >
                 Din {result.thesis === "bull" ? "BULL" : "BEAR"}-tes stöds till{" "}
@@ -963,40 +963,40 @@ async function logSimulationTrade(simulationResult) {
 
             {/* Breakdown */}
             <div
-              className="grid gap-3 text-center border-t border-b border-amber-900 py-3"
+              className="grid gap-3 text-center border-t border-b border-cyan-900 py-3"
               style={{
                 gridTemplateColumns: `repeat(${2 + (result.weights.ai > 0 ? 1 : 0) + (result.weights.news > 0 ? 1 : 0) + (result.weights.amd > 0 ? 1 : 0)}, minmax(0, 1fr))`,
               }}
             >
               <div>
-                <div className="text-xs text-amber-700">MONTE CARLO</div>
-                <div className="text-lg text-amber-300">{result.mcProb.toFixed(1)}%</div>
-                <div className="text-xs text-amber-800">vikt {result.weights.mc}%</div>
+                <div className="text-xs text-cyan-700">MONTE CARLO</div>
+                <div className="text-lg text-cyan-300">{result.mcProb.toFixed(1)}%</div>
+                <div className="text-xs text-cyan-800">vikt {result.weights.mc}%</div>
               </div>
               <div>
-                <div className="text-xs text-amber-700">MOMENTUM</div>
-                <div className="text-lg text-amber-300">{result.momentumScore.toFixed(1)}%</div>
-                <div className="text-xs text-amber-800">vikt {result.weights.momentum}%</div>
+                <div className="text-xs text-cyan-700">MOMENTUM</div>
+                <div className="text-lg text-cyan-300">{result.momentumScore.toFixed(1)}%</div>
+                <div className="text-xs text-cyan-800">vikt {result.weights.momentum}%</div>
               </div>
               {result.weights.ai > 0 && (
                 <div>
-                  <div className="text-xs text-amber-700">AI-BILDANALYS</div>
-                  <div className="text-lg text-amber-300">{result.aiScore.toFixed(1)}%</div>
-                  <div className="text-xs text-amber-800">vikt {result.weights.ai}%</div>
+                  <div className="text-xs text-cyan-700">AI-BILDANALYS</div>
+                  <div className="text-lg text-cyan-300">{result.aiScore.toFixed(1)}%</div>
+                  <div className="text-xs text-cyan-800">vikt {result.weights.ai}%</div>
                 </div>
               )}
               {result.weights.news > 0 && (
                 <div>
-                  <div className="text-xs text-amber-700">NYHETSANALYS</div>
-                  <div className="text-lg text-amber-300">{result.newsScore.toFixed(1)}%</div>
-                  <div className="text-xs text-amber-800">vikt {result.weights.news}%</div>
+                  <div className="text-xs text-cyan-700">NYHETSANALYS</div>
+                  <div className="text-lg text-cyan-300">{result.newsScore.toFixed(1)}%</div>
+                  <div className="text-xs text-cyan-800">vikt {result.weights.news}%</div>
                 </div>
               )}
               {result.weights.amd > 0 && (
                 <div>
-                  <div className="text-xs text-amber-700">AMD (BACKUP)</div>
+                  <div className="text-xs text-cyan-700">AMD (BACKUP)</div>
                   <div className="text-lg text-green-400">{result.amdConfidence.toFixed(1)}%</div>
-                  <div className="text-xs text-amber-800">vikt {result.weights.amd}%</div>
+                  <div className="text-xs text-cyan-800">vikt {result.weights.amd}%</div>
                 </div>
               )}
             </div>
@@ -1007,7 +1007,7 @@ async function logSimulationTrade(simulationResult) {
                 className={`text-xs border px-3 py-2 ${
                   result.amdStatus === "confirmed"
                     ? "border-green-900 text-green-400"
-                    : "border-amber-900 text-amber-700"
+                    : "border-cyan-900 text-cyan-700"
                 }`}
               >
                 {result.amdStatus === "confirmed" &&
@@ -1019,14 +1019,14 @@ async function logSimulationTrade(simulationResult) {
               </div>
             )}
 
-            <div className="flex justify-between text-xs text-amber-600">
+            <div className="flex justify-between text-xs text-cyan-600">
               <span>P(rörelse &gt; +5%): {result.bigUpPct.toFixed(1)}%</span>
               <span>P(rörelse &gt; -5%): {result.bigDownPct.toFixed(1)}%</span>
             </div>
 
             {/* Histogram */}
             <div>
-              <div className="text-xs text-amber-700 mb-2 tracking-widest">FÖRDELNING AV SIMULERADE SLUTPRISER</div>
+              <div className="text-xs text-cyan-700 mb-2 tracking-widest">FÖRDELNING AV SIMULERADE SLUTPRISER</div>
               <ResponsiveContainer width="100%" height={140}>
                 <BarChart data={result.histogram}>
                   <XAxis dataKey="x" tick={false} axisLine={{ stroke: "#78350f" }} />
@@ -1039,12 +1039,12 @@ async function logSimulationTrade(simulationResult) {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-              <div className="text-xs text-amber-800 text-center mt-1">
+              <div className="text-xs text-cyan-800 text-center mt-1">
                 streckad linje = nuvarande pris ({price})
               </div>
             </div>
 
-            <div className="border-t border-amber-900 pt-3 text-xs text-amber-700 leading-relaxed">
+            <div className="border-t border-cyan-900 pt-3 text-xs text-cyan-700 leading-relaxed">
               OBS: siffran ovan är en simulering baserad på dina antaganden om volatilitet och drift, en förenklad
               momentum-modell, och (om använda) en AI-bedömning av en graf-bild samt en nyhetsbaserad bedömning av
               enskild aktie. Den är inte kalibrerad mot verkliga utfall och utgör inte finansiell rådgivning.
@@ -1062,8 +1062,8 @@ async function logSimulationTrade(simulationResult) {
 function Field({ label, value, onChange, min, max, step, suffix }) {
   return (
     <div>
-      <div className="text-xs text-amber-700 mb-1">{label}</div>
-      <div className="flex items-center border border-amber-900 focus-within:border-amber-500">
+      <div className="text-xs text-cyan-700 mb-1">{label}</div>
+      <div className="flex items-center border border-cyan-900 focus-within:border-cyan-500">
         <input
           type="number"
           value={value}
@@ -1071,9 +1071,9 @@ function Field({ label, value, onChange, min, max, step, suffix }) {
           max={max}
           step={step}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full bg-black text-amber-300 px-2 py-2 outline-none text-sm"
+          className="w-full bg-black text-cyan-300 px-2 py-2 outline-none text-sm"
         />
-        {suffix && <span className="pr-2 text-amber-700 text-xs">{suffix}</span>}
+        {suffix && <span className="pr-2 text-cyan-700 text-xs">{suffix}</span>}
       </div>
     </div>
   );

@@ -66,7 +66,7 @@ export default function LoginGate({ children }) {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-black text-amber-400 flex items-center justify-center font-mono">
+      <div className="min-h-screen bg-black text-cyan-400 flex items-center justify-center font-mono">
         KONTROLLERAR SESSION...
       </div>
     );
@@ -77,8 +77,8 @@ export default function LoginGate({ children }) {
   }
 
   return (
-    <div className="min-h-screen bg-black text-amber-400 flex items-center justify-center p-6 font-mono">
-      <div className="w-full max-w-md border border-amber-500 p-6">
+    <div className="min-h-screen bg-black text-cyan-400 flex items-center justify-center p-6 font-mono">
+      <div className="w-full max-w-md border border-cyan-500 p-6">
         <div className="text-xs tracking-widest text-orange-500 mb-2">
           SECURE ACCESS // v1.0
         </div>
@@ -97,7 +97,7 @@ export default function LoginGate({ children }) {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"
-            className="w-full bg-black border border-amber-600 px-4 py-3 outline-none text-amber-300 mb-4"
+            className="w-full bg-black border border-cyan-600 px-4 py-3 outline-none text-cyan-300 mb-4"
             placeholder="••••••••••••"
           />
 
@@ -110,7 +110,7 @@ export default function LoginGate({ children }) {
           <button
             type="submit"
             disabled={loggingIn || !password}
-            className="w-full border border-amber-500 py-3 disabled:opacity-40"
+            className="w-full border border-cyan-500 py-3 disabled:opacity-40"
           >
             {loggingIn ? "LOGGAR IN..." : "LOGGA IN >"}
           </button>
