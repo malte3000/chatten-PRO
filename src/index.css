@@ -2,13 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
+html, body, #root {
   min-height: 100%;
 }
 
 body {
   margin: 0;
-  background: #000;
+  background: radial-gradient(circle at top, #0f172a 0%, #020617 45%, #000000 100%);
+  color: #e2e8f0;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
