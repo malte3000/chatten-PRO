@@ -178,11 +178,12 @@ export default function SannolikhetsTerminal() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        imageBase64,
-        imageMediaType,ticker: 
-        ticker.trim(),
-        market,
+     body: JSON.stringify({
+  imageBase64,
+  imageMediaType,
+  ticker: ticker.trim(),
+  market,
+}),
       }),
     });
 
