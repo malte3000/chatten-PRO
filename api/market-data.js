@@ -130,8 +130,7 @@ if (!validation.valid) {
 validation,
 
 price: latest?.close ?? null,
-      price: latest?.close ?? null,
-      latest,
+      
 
       bars,
     });
