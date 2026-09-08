@@ -130,9 +130,9 @@ if (!validation.valid) {
 validation,
 
 price: latest?.close ?? null,
-      
+latest,
 
-      bars,
+bars,
     });
   } catch (error) {
     console.error("Market data error:", error);
