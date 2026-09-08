@@ -180,7 +180,8 @@ export default function SannolikhetsTerminal() {
       },
       body: JSON.stringify({
         imageBase64,
-        imageMediaType,
+        imageMediaType,ticker: 
+        ticker.trim(),
         market,
       }),
     });
