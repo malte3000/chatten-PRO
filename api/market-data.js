@@ -1,5 +1,5 @@
 import { isAuthenticated } from "./_auth.js";
-
+import { validateMarketBars } from "./_market-data-validation.js";
 const ALLOWED_INTERVALS = new Set([
   "1min",
   "5min",
@@ -110,7 +110,15 @@ export default async function handler(req, res) {
       .reverse();
 
     const latest = bars[bars.length - 1];
+const validation = validateMarketBars(bars);
 
+if (!validation.valid) {
+  return res.status(502).json({
+    error: "Invalid market data",
+    message: "Marknadsdatan innehåller ogiltiga candles.",
+    validation,
+  });
+}
     return res.status(200).json({
       source: "twelve_data",
       ticker: data.meta?.symbol || ticker,
@@ -119,7 +127,9 @@ export default async function handler(req, res) {
       currency: data.meta?.currency || null,
       timezone: data.meta?.exchange_timezone || null,
       fetched_at: new Date().toISOString(),
+validation,
 
+price: latest?.close ?? null,
       price: latest?.close ?? null,
       latest,
 

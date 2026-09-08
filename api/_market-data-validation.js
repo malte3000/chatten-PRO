@@ -1,0 +1,108 @@
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function validateCandle(bar, index = null) {
+  const errors = [];
+
+  if (!bar || typeof bar !== "object") {
+    return {
+      valid: false,
+      errors: ["Candlen är inte ett giltigt objekt"],
+    };
+  }
+
+  if (!bar.datetime || typeof bar.datetime !== "string") {
+    errors.push("datetime saknas eller är ogiltig");
+  }
+
+  const requiredPrices = ["open", "high", "low", "close"];
+
+  for (const field of requiredPrices) {
+    if (!isFiniteNumber(bar[field])) {
+      errors.push(`${field} saknas eller är inte ett giltigt tal`);
+    } else if (bar[field] <= 0) {
+      errors.push(`${field} måste vara större än 0`);
+    }
+  }
+
+  const hasValidOhlc = requiredPrices.every((field) =>
+    isFiniteNumber(bar[field])
+  );
+
+  if (hasValidOhlc) {
+    if (bar.high < bar.low) {
+      errors.push("high är lägre än low");
+    }
+
+    if (bar.high < bar.open) {
+      errors.push("high är lägre än open");
+    }
+
+    if (bar.high < bar.close) {
+      errors.push("high är lägre än close");
+    }
+
+    if (bar.low > bar.open) {
+      errors.push("low är högre än open");
+    }
+
+    if (bar.low > bar.close) {
+      errors.push("low är högre än close");
+    }
+  }
+
+  if (
+    bar.volume !== null &&
+    bar.volume !== undefined &&
+    (!isFiniteNumber(bar.volume) || bar.volume < 0)
+  ) {
+    errors.push("volume är ogiltig");
+  }
+
+  return {
+    valid: errors.length === 0,
+    index,
+    datetime: bar.datetime || null,
+    errors,
+  };
+}
+
+export function validateMarketBars(bars) {
+  if (!Array.isArray(bars) || bars.length === 0) {
+    return {
+      valid: false,
+      totalBars: 0,
+      validBars: 0,
+      invalidBars: 0,
+      errors: [
+        {
+          index: null,
+          datetime: null,
+          errors: ["Inga candles finns att validera"],
+        },
+      ],
+    };
+  }
+
+  const invalid = [];
+
+  bars.forEach((bar, index) => {
+    const result = validateCandle(bar, index);
+
+    if (!result.valid) {
+      invalid.push(result);
+    }
+  });
+
+  return {
+    valid: invalid.length === 0,
+    totalBars: bars.length,
+    validBars: bars.length - invalid.length,
+    invalidBars: invalid.length,
+
+    // Vi begränsar detaljerna så ett trasigt dataset
+    // inte skapar ett enormt API-svar.
+    errors: invalid.slice(0, 20),
+  };
+}
