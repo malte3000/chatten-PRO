@@ -118,7 +118,8 @@ export function buildTradeRecord({
   aiAnalysis,
   newsAnalysis,
   market,
-  marketStatus,
+marketStatus,
+marketData,
 }) {
   const cleanTicker = ticker.trim().toUpperCase();
 
@@ -228,7 +229,22 @@ export function buildTradeRecord({
             hours: marketStatus.hours || null,
           }
         : null,
-
+market_data: marketData
+  ? {
+      source: marketData.source || null,
+      ticker: marketData.ticker || null,
+      interval: marketData.interval || null,
+      exchange: marketData.exchange || null,
+      currency: marketData.currency || null,
+      timezone: marketData.timezone || null,
+      fetched_at: marketData.fetched_at || null,
+      price: numberOrNull(marketData.price),
+      latest: marketData.latest || null,
+      bars: Array.isArray(marketData.bars)
+        ? marketData.bars
+        : [],
+    }
+  : null,
       current_price: numberOrNull(price),
 
       volatility_annual_pct: numberOrNull(vol),

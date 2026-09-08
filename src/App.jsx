@@ -375,7 +375,8 @@ async function logSimulationTrade(simulationResult) {
       aiAnalysis,
       newsAnalysis,
       market,
-      marketStatus,
+marketStatus,
+marketData,
     });
 
     const savedTrade = await saveTrade(trade);
