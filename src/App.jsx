@@ -518,7 +518,7 @@ async function logSimulationTrade(simulationResult) {
   const marketControlOff = market === "off";
 
   return (
-    <div className="min-h-screen bg-black text-amber-400 font-mono p-4 md:p-8">
+    <div className="min-h-screen bg-transparent text-slate-200 font-mono p-4 md:p-8">
       <div className="max-w-3xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-amber-800 pb-3 mb-6">
