@@ -12,7 +12,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { imageBase64, imageMediaType, market = "stockholm" } = req.body || {};
+    const {
+  imageBase64,
+  imageMediaType,
+  ticker = "",
+  market = "stockholm",
+} = req.body || {};
 
     if (!imageBase64 || !imageMediaType) {
       return res.status(400).json({ error: "Bild saknas" });
@@ -48,6 +53,9 @@ export default async function handler(req, res) {
               {
                 type: "text",
                 text: `Du analyserar en bild av en aktiekursgraf för daytrading.
+
+Aktie/ticker: ${ticker.trim() || "okänd"}.
+Använd tickern som kontext, men hitta inte på information som inte syns i grafen.
 
 Gör följande:
 
@@ -118,7 +126,10 @@ Svara ENDAST med ett giltigt JSON-objekt i exakt följande format:
 
     const analysis = JSON.parse(clean);
 
-    return res.status(200).json(analysis);
+    return res.status(200).json({
+  ...analysis,
+  ticker: ticker.trim().toUpperCase() || null,
+});
   } catch (error) {
     console.error(error);
 
