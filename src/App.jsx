@@ -94,6 +94,9 @@ export default function SannolikhetsTerminal() {
 
   // Nyhetsanalys per aktie
   const [ticker, setTicker] = useState("");
+  const [marketData, setMarketData] = useState(null);
+const [marketDataLoading, setMarketDataLoading] = useState(false);
+const [marketDataError, setMarketDataError] = useState(null);
   const [newsAnalyzing, setNewsAnalyzing] = useState(false);
   const [newsAnalysis, setNewsAnalysis] = useState(null);
   const [newsError, setNewsError] = useState(null);
@@ -124,7 +127,45 @@ export default function SannolikhetsTerminal() {
       clearInterval(interval);
     };
   }, [market]);
+async function fetchMarketData() {
+  if (!ticker.trim()) return;
 
+  setMarketDataLoading(true);
+  setMarketDataError(null);
+
+  try {
+    const response = await fetch(
+      `/api/market-data?ticker=${encodeURIComponent(
+        ticker.trim()
+      )}&interval=1min&outputsize=100`
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.message ||
+        data?.error ||
+        "Kunde inte hämta marknadsdata"
+      );
+    }
+
+    setMarketData(data);
+
+    if (typeof data.price === "number") {
+      setPrice(data.price);
+    }
+  } catch (error) {
+    console.error("Market data fetch error:", error);
+
+    setMarketData(null);
+    setMarketDataError(
+      error.message || "Okänt fel"
+    );
+  } finally {
+    setMarketDataLoading(false);
+  }
+}
   function handleMarketChange(event) {
     setMarket(event.target.value);
     setAiAnalysis(null);
@@ -583,7 +624,27 @@ async function logSimulationTrade(simulationResult) {
     onChange={(e) => setTicker(e.target.value)}
     placeholder="t.ex. NVDA, AAPL, EVO"
     className="w-full bg-black border border-cyan-900 focus:border-cyan-500 text-cyan-300 px-3 py-2 outline-none text-sm"
-  />
+  /><div className="mt-3 flex items-center gap-3">
+  <button
+    onClick={fetchMarketData}
+    disabled={marketDataLoading || !ticker.trim()}
+    className="border border-cyan-500 text-cyan-300 px-4 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
+  >
+    {marketDataLoading ? "HÄMTAR..." : "HÄMTA MARKNADSDATA >"}
+  </button>
+
+  {marketData && (
+    <div className="text-xs text-green-400">
+      {marketData.ticker} · {marketData.price}
+    </div>
+  )}
+</div>
+
+{marketDataError && (
+  <div className="mt-2 text-xs text-red-400">
+    {marketDataError}
+  </div>
+)}
 </div>
         {/* Image analysis panel */}
         <div className="border border-cyan-800 p-4 mb-6">
