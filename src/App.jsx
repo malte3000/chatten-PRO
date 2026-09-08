@@ -184,8 +184,7 @@ export default function SannolikhetsTerminal() {
   ticker: ticker.trim(),
   market,
 }),
-      }),
-    });
+});
 
     const data = await response.json();
 
