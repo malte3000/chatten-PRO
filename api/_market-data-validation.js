@@ -88,58 +88,60 @@ export function validateMarketBars(bars) {
   const invalid = [];
 const datasetErrors = [];
 const seenDatetimes = new Set();
-  bars.forEach((bar, index) => {
+
+bars.forEach((bar, index) => {
   const datetime = bar?.datetime;
 
-if (typeof datetime === "string" && datetime) {
-  if (seenDatetimes.has(datetime)) {
-    datasetErrors.push({
-      index,
-      datetime,
-      errors: ["Duplicerad candle-tid"],
-    });
-    const allErrors = [...invalid, ...datasetErrors];
+  if (typeof datetime === "string" && datetime) {
+    if (seenDatetimes.has(datetime)) {
+      datasetErrors.push({
+        index,
+        datetime,
+        errors: ["Duplicerad candle-tid"],
+      });
+    }
+
+    seenDatetimes.add(datetime);
+
+    if (index > 0) {
+      const previousDatetime = bars[index - 1]?.datetime;
+
+      if (
+        typeof previousDatetime === "string" &&
+        previousDatetime &&
+        datetime < previousDatetime
+      ) {
+        datasetErrors.push({
+          index,
+          datetime,
+          errors: [
+            `Candles ligger i fel tidsordning: ${datetime} efter ${previousDatetime}`,
+          ],
+        });
+      }
+    }
+  }
+
+  const result = validateCandle(bar, index);
+
+  if (!result.valid) {
+    invalid.push(result);
+  }
+});
+
+const allErrors = [...invalid, ...datasetErrors];
 
 const invalidIndexes = new Set(
   allErrors
     .map((item) => item.index)
     .filter((index) => index !== null)
 );
-  }
 
-  seenDatetimes.add(datetime);
-
-  if (index > 0) {
-    const previousDatetime = bars[index - 1]?.datetime;
-
-    if (
-      typeof previousDatetime === "string" &&
-      previousDatetime &&
-      datetime < previousDatetime
-    ) {
-      datasetErrors.push({
-        index,
-        datetime,
-        errors: [
-          `Candles ligger i fel tidsordning: ${datetime} efter ${previousDatetime}`,
-        ],
-      });
-    }
-  }
-}
-    const result = validateCandle(bar, index);
-
-    if (!result.valid) {
-      invalid.push(result);
-    }
-  });
-
-  return {
+return {
   valid: allErrors.length === 0,
   totalBars: bars.length,
   validBars: bars.length - invalidIndexes.size,
   invalidBars: invalidIndexes.size,
-
   errors: allErrors.slice(0, 20),
 };
 }
