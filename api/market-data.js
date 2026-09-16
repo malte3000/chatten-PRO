@@ -6,6 +6,7 @@ const ALLOWED_INTERVALS = new Set([
   "15min",
   "30min",
   "1h",
+  "1day",
 ]);
 
 function toNumber(value) {
@@ -41,6 +42,8 @@ export default async function handler(req, res) {
       .toUpperCase();
 
     const interval = String(req.query.interval || "1min");
+    const exchange = String(req.query.exchange || "").trim();
+    if (exchange && !/^[A-Za-z0-9._ -]{1,60}$/.test(exchange)) return res.status(400).json({ error: "Ogiltig börs" });
 
     const requestedOutputSize = Number.parseInt(
       req.query.outputsize || "100",
@@ -75,7 +78,9 @@ export default async function handler(req, res) {
       outputsize: String(outputsize),
       apikey: apiKey,
       format: "JSON",
+      timezone: "UTC",
     });
+    if (exchange) params.set("exchange", exchange);
 
     const response = await fetch(
       `https://api.twelvedata.com/time_series?${params.toString()}`
@@ -96,6 +101,11 @@ export default async function handler(req, res) {
       return res.status(502).json({
         error: "Ingen marknadsdata returnerades",
       });
+    }
+
+    if (String(data.meta?.symbol || "").toUpperCase() !== ticker ||
+        (exchange && String(data.meta?.exchange || "").toUpperCase() !== exchange.toUpperCase())) {
+      return res.status(502).json({ error: "Prisdata matchar inte vald aktie och börs." });
     }
 
     const bars = data.values
@@ -121,6 +131,8 @@ if (!validation.valid) {
 }
     return res.status(200).json({
       source: "twelve_data",
+      requested_ticker: ticker,
+      requested_exchange: exchange || null,
       ticker: data.meta?.symbol || ticker,
       interval: data.meta?.interval || interval,
       exchange: data.meta?.exchange || null,

@@ -2,6 +2,25 @@
 
 ## Projekt: Sannolikhetsterminal / Signal Bot
 
+### Godkänd inriktning 2026-09-16 (ersätter äldre UI/signalexempel nedan)
+
+- Swingtrading (1–5 handelsdagar) är huvudläge; daytrading är sekundärt.
+- Endast TRADE, AVVAKTA eller NO TRADE visas som slutbeslut.
+- Samlad kort analys med Start och Se mer, inte separata analysverktyg.
+- AI-confidence får inte användas som uppgångs-/vinstsannolikhet.
+- TRADE kräver validerad signalmotor och godkänd separat Risk Engine.
+- 65–75 procent träffsäkerhet är ett testmål, inte ett påstående om resultat.
+- Förslag och faktiska trades ska hållas isär i personlig journal.
+- Ingen automatisk orderläggning eller självlärande strategiändring.
+
+Första etappen implementerar kompakt analys och befintlig gemensam journal.
+Personlig identitet, utfallsregistrering och validerad quant/risk återstår.
+Screeningens första experimentella version är nu implementerad för ett
+budgetbegränsat, dagligt varierat aktieurval. EMA20/50, ATR, momentum och RVOL
+gallrar kandidater utan TRADE-godkännande. Nyheter hämtas för högst tre
+kandidater och SCAN-rapporter hålls isär från faktiska trades. Global kvot,
+fullständigare urval, produktdata och validerad strategi återstår.
+
 ### Version
 0.1 – Grundspecifikation
 

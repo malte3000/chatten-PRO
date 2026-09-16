@@ -1,0 +1,7 @@
+node_modules/
+.pnpm-store/
+tests/preview-*.png
+dist/
+.env
+.env.*
+!.env.example

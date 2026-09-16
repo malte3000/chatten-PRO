@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { ticker, horizonText, market = "stockholm" } = req.body || {};
+    const { ticker, companyName = "", exchange = "", horizonText, market = "stockholm" } = req.body || {};
 
     if (!ticker || !ticker.trim()) {
       return res.status(400).json({
@@ -22,9 +22,7 @@ export default async function handler(req, res) {
     }
 
     const marketStatus = getMarketStatus(market);
-    if (!marketStatus.isOpen) {
-      return res.status(423).json({ error: "MARKET_CLOSED", message: `${marketStatus.label} är stängd. Nyhetsanalysen kördes inte.`, marketStatus });
-    }
+    // News remains relevant outside exchange hours. No trade approval here.
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -51,8 +49,10 @@ export default async function handler(req, res) {
 
             content: `
 Analysera färska nyheter för aktien eller bolaget "${ticker}".
+Bolagskontext: ${String(companyName).slice(0, 160)}. Börs: ${String(exchange).slice(0, 60)}.
+Om bolaget inte kan identifieras säkert: direction = "oklart". Blanda inte ihop bolag som har liknande tickers.
 
-Användaren funderar på en DAYTRADE med en hållperiod på ungefär ${
+Användaren analyserar en möjlig aktieposition med en hållperiod på ungefär ${
               horizonText || "samma handelsdag"
             }.
 
@@ -84,7 +84,9 @@ Exakt format:
 
 {
   "direction": "upp",
-  "confidence": 50,
+  "direction_confidence": 50,
+  "probability_up": null,
+  "summary": "Kort sammanfattning på högst två meningar",
   "magnitude_note": "",
   "key_news": [
     {
@@ -107,7 +109,8 @@ impact:
 "negativ"
 "neutral"
 
-confidence ska vara ett heltal mellan 0 och 100.
+direction_confidence ska vara ett heltal mellan 0 och 100: säkerhet i riktningsbedömningen, INTE sannolikhet för uppgång.
+probability_up ska vara null. Ingen statistiskt kalibrerad sannolikhetsmodell finns här.
 
 Skriv all text på svenska.
 `,
@@ -125,6 +128,10 @@ Skriv all text på svenska.
         error: "Anthropic API error",
         details: data,
       });
+    }
+
+    if (data.stop_reason === "pause_turn" || data.stop_reason === "max_tokens") {
+      return res.status(502).json({ error: "Nyhetsanalysen blev inte komplett. Ingen signal skapades." });
     }
 
     const textBlocks = (data.content || [])
@@ -146,7 +153,15 @@ Skriv all text på svenska.
 
     const analysis = JSON.parse(clean);
 
-    return res.status(200).json(analysis);
+    if (!analysis || !["upp", "ner", "oklart"].includes(analysis.direction) ||
+        !Number.isInteger(analysis.direction_confidence) || analysis.direction_confidence < 0 || analysis.direction_confidence > 100 ||
+        typeof analysis.summary !== "string" || typeof analysis.reasoning !== "string" ||
+        !Array.isArray(analysis.key_news) || !analysis.key_news.every((item) =>
+          item && typeof item.headline === "string" && ["positiv", "negativ", "neutral"].includes(item.impact))) {
+      return res.status(502).json({ error: "Nyhetsanalysens format är ogiltigt. Ingen signal skapades." });
+    }
+
+    return res.status(200).json({ ...analysis, ticker: ticker.trim().toUpperCase(), probability_up: null, marketStatus });
   } catch (error) {
     console.error(error);
 

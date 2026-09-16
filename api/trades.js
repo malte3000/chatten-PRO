@@ -89,6 +89,14 @@ export default async function handler(req, res) {
     });
   }
 
+  // Preview deployments may inherit production credentials. Never write by default.
+  if (req.method === "POST" && process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_ALLOW_WRITES !== "true") {
+    return res.status(409).json({
+      error: "Sparande är avstängt i testmiljön",
+      message: "Aktivera endast PREVIEW_ALLOW_WRITES med en separat testdatabas.",
+    });
+  }
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 

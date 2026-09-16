@@ -1,1143 +1,210 @@
-import React, { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
-import { saveTrade } from "./tradeLogger.js";
-import { buildTradeRecord } from "./tradePolicy.js";
-const UNIT_LABELS = { minuter: "minuter", timmar: "timmar" };
-const UNIT_TO_TRADING_DAYS = { minuter: 1 / 390, timmar: 1 / 6.5 };
-const HORIZON_PRESETS = [
-  { label: "15 MIN", amount: 15, unit: "minuter" },
-  { label: "30 MIN", amount: 30, unit: "minuter" },
-  { label: "1H", amount: 1, unit: "timmar" },
-  { label: "4H", amount: 4, unit: "timmar" },
-  { label: "HELA DAGEN", amount: 6.5, unit: "timmar" },
-];
+import React, { useEffect, useRef, useState } from "react";
+import { normalizeTicker, evaluateReadiness, createAnalysisRecord } from "./analysisModel.js";
+import MarketScanner from "./MarketScanner.jsx";
 
-function clampPercent(value) {
-  return Math.min(100, Math.max(0, value));
+const LABELS = { TRADE: "TRADE", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
+const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
+
+async function request(url, options = {}) {
+  const response = await fetch(url, { credentials: "include", ...options });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || data.error || "Förfrågan misslyckades");
+  return data;
 }
 
-function asPercent(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  return clampPercent(Math.abs(numeric) <= 1 ? numeric * 100 : numeric);
+function Details({ title, children }) {
+  return <details className="border-t border-slate-800 mt-3 pt-3 text-sm">
+    <summary className="cursor-pointer text-cyan-300">Se mer – {title}</summary>
+    <div className="mt-3 space-y-3 text-slate-300">{children}</div>
+  </details>;
 }
 
-function getPatternMarker(analysis) {
-  if (!analysis) return null;
-
-  const technicalPattern = analysis.technical_pattern;
-  const region =
-    analysis.pattern_annotation ||
-    analysis.technical_pattern_annotation ||
-    analysis.pattern_region ||
-    analysis.pattern_box ||
-    (technicalPattern && typeof technicalPattern === "object"
-      ? technicalPattern.region || technicalPattern.bbox
-      : null);
-  const box = region?.bbox || region?.box || region?.region || region;
-  const x = asPercent(box?.x ?? box?.left);
-  const y = asPercent(box?.y ?? box?.top);
-  const right = asPercent(box?.right);
-  const bottom = asPercent(box?.bottom);
-  const rawWidth = asPercent(box?.width);
-  const rawHeight = asPercent(box?.height);
-  const width = rawWidth ?? (x !== null && right !== null ? right - x : null);
-  const height = rawHeight ?? (y !== null && bottom !== null ? bottom - y : null);
-  const hasBox = x !== null && y !== null && width !== null && height !== null && width > 0 && height > 0;
-  const label =
-    region?.label ||
-    region?.name ||
-    (technicalPattern && typeof technicalPattern === "object" ? technicalPattern.name || technicalPattern.label : technicalPattern) ||
-    analysis.candlestick_pattern ||
-    (analysis.amd_phase && analysis.amd_phase !== "unclear" ? `AMD: ${analysis.amd_phase}` : null);
-
-  if (!label) return null;
-
-  return {
-    label: String(label),
-    box: hasBox
-      ? {
-          left: x,
-          top: y,
-          width: Math.min(width, 100 - x),
-          height: Math.min(height, 100 - y),
-        }
-      : null,
-  };
-}
-
-export default function SannolikhetsTerminal() {
-  const [price, setPrice] = useState(100);
-  const [vol, setVol] = useState(35);
-  const [drift, setDrift] = useState(5);
-  const [horizonAmount, setHorizonAmount] = useState(30);
-  const [horizonUnit, setHorizonUnit] = useState("minuter");
-  const [momentum, setMomentum] = useState("neutral");
-  const [thesis, setThesis] = useState("bull");
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState(null);
-  const [clock, setClock] = useState(new Date());
-  const [market, setMarket] = useState("stockholm");
-  const [marketStatus, setMarketStatus] = useState(null);
-  const [simulationMessage, setSimulationMessage] = useState(null);
-  const rafRef = useRef(null);
-
-  // Image analysis state
-  const [imagePreview, setImagePreview] = useState(null);
-  const [imageBase64, setImageBase64] = useState(null);
-  const [imageMediaType, setImageMediaType] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState(null);
-  const [aiError, setAiError] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // Nyhetsanalys per aktie
+export default function App() {
+  const [mode, setMode] = useState("scan");
+  const [exchange, setExchange] = useState("");
   const [ticker, setTicker] = useState("");
-  const [marketData, setMarketData] = useState(null);
-const [marketDataLoading, setMarketDataLoading] = useState(false);
-const [marketDataError, setMarketDataError] = useState(null);
-  const [newsAnalyzing, setNewsAnalyzing] = useState(false);
-  const [newsAnalysis, setNewsAnalysis] = useState(null);
-  const [newsError, setNewsError] = useState(null);
+  const [horizon, setHorizon] = useState("week");
+  const [market, setMarket] = useState("usa");
+  const [image, setImage] = useState(null);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [saveState, setSaveState] = useState("idle");
+  const [history, setHistory] = useState([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const revision = useRef(0);
+  const controller = useRef(null);
+  const fileInput = useRef(null);
+  const historyRevision = useRef(0);
+
+  async function refreshHistory() {
+    const version = ++historyRevision.current;
+    setHistoryLoading(true); setHistoryError("");
+    try {
+      const data = await request("/api/trades");
+      if (!Array.isArray(data.trades)) throw new Error("Journalens svar är ogiltigt");
+      if (version === historyRevision.current) setHistory(data.trades);
+    } catch (error) {
+      if (version === historyRevision.current) setHistoryError(error.message);
+    } finally {
+      if (version === historyRevision.current) setHistoryLoading(false);
+    }
+  }
 
   useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
-    return () => clearInterval(t);
+    void refreshHistory();
+    return () => { controller.current?.abort(); revision.current++; historyRevision.current++; };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-
-    async function refreshMarketStatus() {
-      try {
-        const response = await fetch(`/api/market-status?market=${market}`);
-        const data = await response.json();
-        if (active && response.ok) setMarketStatus(data);
-      } catch (error) {
-        console.error("Kunde inte hämta marknadsstatus", error);
-      }
-    }
-
-    setMarketStatus(null);
-    refreshMarketStatus();
-    const interval = setInterval(refreshMarketStatus, 60000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [market]);
-async function fetchMarketData() {
-  if (!ticker.trim()) return;
-
-  setMarketDataLoading(true);
-  setMarketDataError(null);
-
-  try {
-    const response = await fetch(
-      `/api/market-data?ticker=${encodeURIComponent(
-        ticker.trim()
-      )}&interval=1min&outputsize=100`
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        data?.message ||
-        data?.error ||
-        "Kunde inte hämta marknadsdata"
-      );
-    }
-
-    setMarketData(data);
-
-    if (typeof data.price === "number") {
-      setPrice(data.price);
-    }
-  } catch (error) {
-    console.error("Market data fetch error:", error);
-
-    setMarketData(null);
-    setMarketDataError(
-      error.message || "Okänt fel"
-    );
-  } finally {
-    setMarketDataLoading(false);
-  }
-}
-  function handleMarketChange(event) {
-    setMarket(event.target.value);
-    setAiAnalysis(null);
-    setNewsAnalysis(null);
-    setResult(null);
-    setAiError(null);
-    setNewsError(null);
-    setSimulationMessage(null);
+  function invalidate() {
+    revision.current++; controller.current?.abort();
+    setBusy(false); setResult(null); setSaveState("idle"); setNotice("");
   }
 
-  const momentumScore = { bullish: 66, neutral: 50, bearish: 34 }[momentum];
-  const momentumLabel = { bullish: "BULLISH", neutral: "NEUTRAL", bearish: "BEARISH" }[momentum];
-
-  function randNormal() {
-    let u = 0, v = 0;
-    while (u === 0) u = Math.random();
-    while (v === 0) v = Math.random();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  function changeTicker(value) {
+    invalidate(); setTicker(value); setImage(null); setExchange("");
+    if (fileInput.current) fileInput.current.value = "";
   }
 
-  function handleImageSelect(e) {
-    const file = e.target.files && e.target.files[0];
+  function selectImage(event) {
+    const file = event.target.files?.[0];
     if (!file) return;
-    setAiAnalysis(null);
-    setAiError(null);
+    invalidate();
+    const version = revision.current;
+    setImage(null);
+    if (!file.type.startsWith("image/") || file.size > 4 * 1024 * 1024) {
+      setNotice("Välj en bild mindre än 4 MB."); event.target.value = ""; return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
-      const res = reader.result;
-      const base64 = res.split(",")[1];
-      setImagePreview(res);
-      setImageBase64(base64);
-      setImageMediaType(file.type || "image/png");
+      if (version !== revision.current) return;
+      setImage({ preview: reader.result, base64: reader.result.split(",")[1], type: file.type, confirmed: false });
+      setNotice(`Bekräfta att grafen gäller ${normalizeTicker(ticker)}. Systemet identifierar inte tickern från bilden.`);
     };
+    reader.onerror = () => { if (version === revision.current) setNotice("Bilden kunde inte läsas."); };
     reader.readAsDataURL(file);
   }
 
-  async function analyzeImage() {
-  if (!imageBase64) return;
-  if (marketStatus && !marketStatus.isOpen) {
-    setAiError("Marknaden är stängd. Ingen AI-analys kördes.");
-    return;
+  async function persist(snapshot) {
+    setSaveState("saving");
+    try {
+      await request("/api/trades", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot.record) });
+      if (snapshot.version === revision.current) setSaveState("saved");
+      void refreshHistory();
+    } catch (error) {
+      if (snapshot.version === revision.current) { setSaveState("failed"); setNotice(`Analysen kunde inte sparas: ${error.message}`); }
+    }
   }
 
-  setAnalyzing(true);
-  setAiError(null);
-  setAiAnalysis(null);
-
-  try {
-    const response = await fetch("/api/analyze-image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-     body: JSON.stringify({
-  imageBase64,
-  imageMediaType,
-  ticker: ticker.trim(),
-  market,
-}),
-});
-
-    const data = await response.json();
-
-    if (data?.marketStatus) setMarketStatus(data.marketStatus);
-    if (response.status === 423 && data?.error === "MARKET_CLOSED") {
-      setAiError(data.message);
-      return;
+  async function start(override = null) {
+    if (!normalizeTicker(override?.symbol || ticker) || busy || (!override && image && !image.confirmed)) return;
+    invalidate();
+    const version = revision.current;
+    const abort = new AbortController(); controller.current = abort;
+    setBusy(true);
+    const currentTicker = normalizeTicker(override?.symbol || ticker);
+    const currentExchange = override?.exchange || exchange;
+    const horizonText = horizon === "week" ? "1–5 handelsdagar (swingtrading)" : "samma handelsdag (daytrading)";
+    const post = (url, body) => request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.signal });
+    try {
+      const responses = await Promise.allSettled([
+        request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal }),
+        post("/api/analyze-news", { ticker: currentTicker, companyName: override?.name, exchange: currentExchange, horizonText, market }),
+        !override && image ? post("/api/analyze-image", { ticker: currentTicker, imageBase64: image.base64, imageMediaType: image.type, market }) : Promise.resolve(null),
+      ]);
+      if (version !== revision.current) return;
+      const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
+      const errors = responses.slice(0, 2).flatMap((response, index) => response.status === "rejected" ? [`${index === 0 ? "Marknadsdata" : "Nyheter"}: ${response.reason.message}`] : []);
+      const analysis = { ticker: currentTicker, horizon: horizonText, market, marketData: values[0], news: values[1], chart: values[2] };
+      analysis.decision = evaluateReadiness({ ...analysis, errors });
+      if (responses[2].status === "rejected") analysis.chartError = responses[2].reason.message;
+      const snapshot = { ...analysis, version, record: createAnalysisRecord(analysis) };
+      setResult(snapshot); await persist(snapshot);
+    } catch (error) {
+      if (version === revision.current) setNotice(`Analysen misslyckades. Ingen trade godkändes: ${error.message}`);
+    } finally {
+      if (version === revision.current) setBusy(false);
     }
-
-    if (!response.ok) {
-      throw new Error(data?.message || data?.error || "API-fel");
-    }
-
-    setAiAnalysis(data);
-
-    if (
-      data.trend === "bullish" ||
-      data.trend === "neutral" ||
-      data.trend === "bearish"
-    ) {
-      setMomentum(data.trend);
-    }
-
-    if (typeof data.volatility_estimate === "number") {
-      setVol(
-        Math.max(
-          1,
-          Math.min(150, Math.round(data.volatility_estimate))
-        )
-      );
-    }
-
-    if (typeof data.drift_estimate === "number") {
-      setDrift(
-        Math.max(
-          -100,
-          Math.min(100, Math.round(data.drift_estimate))
-        )
-      );
-    }
-
-    if (
-      typeof data.price_detected === "number" &&
-      data.price_detected > 0
-    ) {
-      setPrice(Math.round(data.price_detected * 100) / 100);
-    }
-  } catch (err) {
-    console.error(err);
-
-    setAiError(
-      `Kunde inte tolka grafen (${err.message || "okänt fel"}).`
-    );
-  } finally {
-    setAnalyzing(false);
-  
-}
   }
 
-  function clearImage() {
-    setImagePreview(null);
-    setImageBase64(null);
-    setImageMediaType(null);
-    setAiAnalysis(null);
-    setAiError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  async function analyzeNews() {
-  if (!ticker.trim()) return;
-  if (marketStatus && !marketStatus.isOpen) {
-    setNewsError("Marknaden är stängd. Ingen AI-analys kördes.");
-    return;
-  }
-
-  setNewsAnalyzing(true);
-  setNewsError(null);
-  setNewsAnalysis(null);
-
-  const horizonText = `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`;
-
-  try {
-    const response = await fetch("/api/analyze-news", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ticker: ticker.trim(),
-        horizonText,
-        market,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data?.marketStatus) setMarketStatus(data.marketStatus);
-    if (response.status === 423 && data?.error === "MARKET_CLOSED") {
-      setNewsError(data.message);
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        data?.message ||
-        data?.error ||
-        "API-fel"
-      );
-    }
-
-    setNewsAnalysis(data);
-  } catch (err) {
-    console.error(err);
-
-    setNewsError(
-      `Kunde inte hämta nyhetsanalys (${err.message || "okänt fel"}).`
-    );
-  } finally {
-    setNewsAnalyzing(false);
-
-}
-  }
-
-  function clearNews() {
-    setNewsAnalysis(null);
-    setNewsError(null);
-  }
-async function logSimulationTrade(simulationResult) {
-  // Vi loggar inte om vi inte vet vilken aktie signalen gäller.
-  if (!ticker.trim()) {
-    console.warn("Trade logging skipped: ticker saknas.");
-    return;
-  }
-
-  try {
-    const trade = buildTradeRecord({
-      ticker,
-      result: simulationResult,
-      price,
-      vol,
-      drift,
-      horizonAmount,
-      horizonUnit,
-      momentum,
-      momentumScore,
-      thesis,
-      aiAnalysis,
-      newsAnalysis,
-      market,
-marketStatus,
-marketData,
-    });
-
-    const savedTrade = await saveTrade(trade);
-
-    if (!savedTrade.success) {
-      console.error(
-        "Automatic trade logging failed:",
-        savedTrade.error
-      );
-      return;
-    }
-
-    console.log(
-      "Trade automatically logged:",
-      savedTrade.trade
-    );
-  } catch (error) {
-    console.error(
-      "Could not build trade record:",
-      error
-    );
-  }
-}
-  function runSimulation() {
-    if (marketStatus && !marketStatus.isOpen) {
-      setResult(null);
-      setSimulationMessage("Marknaden är stängd. Ingen sannolikhetsberäkning kördes.");
-      return;
-    }
-
-    setSimulationMessage(null);
-    setRunning(true);
-    setResult(null);
-    setProgress(0);
-
-    const NSIM = 2500;
-    const tradingDays = horizonAmount * UNIT_TO_TRADING_DAYS[horizonUnit];
-    const T = tradingDays / 252; // horisont uttryckt i handelsår
-    const muAnnual = drift / 100;
-    const sigmaAnnual = vol / 100;
-    const finals = [];
-    let above = 0;
-    let bigUp = 0;
-    let bigDown = 0;
-
-    // Terminalfördelningen för geometrisk brownsk rörelse behöver bara ett steg
-    // till horisonten T (matematiskt likvärdigt med att stega dag för dag) -
-    // detta gör att korta horisonter ner till minuter hanteras korrekt.
-    for (let i = 0; i < NSIM; i++) {
-      const z = randNormal();
-      const p = price * Math.exp((muAnnual - 0.5 * sigmaAnnual * sigmaAnnual) * T + sigmaAnnual * Math.sqrt(T) * z);
-      finals.push(p);
-      if (p > price) above++;
-      if (p > price * 1.05) bigUp++;
-      if (p < price * 0.95) bigDown++;
-    }
-
-    const mcProb = (above / NSIM) * 100;
-    const hasAi = aiAnalysis && typeof aiAnalysis.confidence === "number";
-    const aiScore = hasAi ? aiAnalysis.confidence : null;
-    const hasNews =
-      newsAnalysis &&
-      typeof newsAnalysis.confidence === "number" &&
-      (newsAnalysis.direction === "upp" || newsAnalysis.direction === "ner");
-    const newsScore = hasNews ? (newsAnalysis.direction === "upp" ? newsAnalysis.confidence : 100 - newsAnalysis.confidence) : null;
-
-    let baseEnsemble;
-    let weights;
-    if (hasAi && hasNews) {
-      baseEnsemble = mcProb * 0.3 + momentumScore * 0.1 + aiScore * 0.3 + newsScore * 0.3;
-      weights = { mc: 30, momentum: 10, ai: 30, news: 30, amd: 0 };
-    } else if (hasAi) {
-      baseEnsemble = mcProb * 0.4 + momentumScore * 0.15 + aiScore * 0.45;
-      weights = { mc: 40, momentum: 15, ai: 45, news: 0, amd: 0 };
-    } else if (hasNews) {
-      baseEnsemble = mcProb * 0.4 + momentumScore * 0.15 + newsScore * 0.45;
-      weights = { mc: 40, momentum: 15, ai: 0, news: 45, amd: 0 };
-    } else {
-      baseEnsemble = mcProb * 0.7 + momentumScore * 0.3;
-      weights = { mc: 70, momentum: 30, ai: 0, news: 0, amd: 0 };
-    }
-
-    // AMD (Accumulation/Manipulation/Distribution) is only ever used as a
-    // confirming backup signal: skipped if unclear, skipped if it disagrees
-    // with the direction the other methods already point to, and only
-    // blended in when it agrees with that direction.
-    let ensemble = baseEnsemble;
-    let amdStatus = "none"; // "none" | "unclear" | "confirmed" | "contradicted"
-    const hasAmd =
-      hasAi && aiAnalysis.amd_phase && aiAnalysis.amd_phase !== "unclear" && typeof aiAnalysis.amd_confidence === "number";
-
-    if (hasAi && (!aiAnalysis.amd_phase || aiAnalysis.amd_phase === "unclear")) {
-      amdStatus = "unclear";
-    } else if (hasAmd) {
-      const baseLeansUp = baseEnsemble > 50;
-      const baseLeansDown = baseEnsemble < 50;
-      const amdLeansUp = aiAnalysis.amd_confidence > 50;
-      const amdLeansDown = aiAnalysis.amd_confidence < 50;
-      const agrees = (baseLeansUp && amdLeansUp) || (baseLeansDown && amdLeansDown);
-      if (baseEnsemble === 50) {
-        amdStatus = "unclear"; // no clear base direction to confirm against
-      } else if (agrees) {
-        const amdWeight = 0.2;
-        ensemble = baseEnsemble * (1 - amdWeight) + aiAnalysis.amd_confidence * amdWeight;
-        weights = {
-          mc: Math.round(weights.mc * (1 - amdWeight)),
-          momentum: Math.round(weights.momentum * (1 - amdWeight)),
-          ai: Math.round(weights.ai * (1 - amdWeight)),
-          news: Math.round(weights.news * (1 - amdWeight)),
-          amd: 20,
-        };
-        amdStatus = "confirmed";
-      } else {
-        amdStatus = "contradicted";
-      }
-    }
-
-    const min = Math.min(...finals);
-    const max = Math.max(...finals);
-    const bucketCount = 22;
-    const bucketSize = (max - min) / bucketCount || 1;
-    const buckets = new Array(bucketCount).fill(0);
-    finals.forEach((f) => {
-      let idx = Math.floor((f - min) / bucketSize);
-      if (idx >= bucketCount) idx = bucketCount - 1;
-      if (idx < 0) idx = 0;
-      buckets[idx]++;
-    });
-    const histogram = buckets.map((count, i) => ({
-      x: min + i * bucketSize,
-      count,
-      isUp: min + i * bucketSize >= price,
-    }));
-
-    let p = 0;
-    const step = () => {
-      p += 6 + Math.random() * 10;
-     if (p >= 100) {
-  setProgress(100);
-  setRunning(false);
-
-  const simulationResult = {
-    mcProb,
-    momentumScore,
-    aiScore,
-    newsScore,
-    amdConfidence: hasAmd ? aiAnalysis.amd_confidence : null,
-    amdPhase: hasAi ? aiAnalysis.amd_phase : null,
-    amdStatus,
-    ensemble,
-    weights,
-    histogram,
-    bigUpPct: (bigUp / NSIM) * 100,
-    bigDownPct: (bigDown / NSIM) * 100,
-    nsim: NSIM,
-    horizonLabel: `${horizonAmount} ${UNIT_LABELS[horizonUnit]}`,
-    thesis,
-  };
-
-  setResult(simulationResult);
-
-  void logSimulationTrade(simulationResult);
-
-  return;
-}
-      
-      setProgress(p);
-      rafRef.current = setTimeout(step, 40);
-    };
-    step();
-  }
-
-  useEffect(() => () => clearTimeout(rafRef.current), []);
-
-  const verdictColor = (v) => (v >= 55 ? "text-green-400" : v <= 45 ? "text-red-400" : "text-cyan-400");
-  const verdictText = (v) =>
-    v >= 60 ? "ÖVERVIKT UPP" : v >= 52 ? "SVAG ÖVERVIKT UPP" : v > 48 ? "NEUTRAL" : v > 40 ? "SVAG ÖVERVIKT NER" : "ÖVERVIKT NER";
-
-  const gaugeAngle = result ? -90 + (result.ensemble / 100) * 180 : -90;
-  const patternMarker = getPatternMarker(aiAnalysis);
-  const marketControlOff = market === "off";
-
-  return (
-    <div className="min-h-screen bg-transparent text-slate-200 font-mono p-4 md:p-8">
-      <div className="max-w-3xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-cyan-800 pb-3 mb-6">
-          <div>
-            <div className="text-xs tracking-widest text-cyan-700">SIMULATOR // v2.0</div>
-            <h1 className="text-xl md:text-2xl tracking-wider text-cyan-300 font-bold">SANNOLIKHETSTERMINAL</h1>
-          </div>
-          <div className="text-right text-xs text-cyan-700">
-            <div className="flex items-center gap-2 justify-end">
-              <span className={`w-2 h-2 rounded-full ${marketControlOff ? "bg-cyan-600" : marketStatus?.isOpen ? "bg-green-400 animate-pulse" : "bg-cyan-800"}`}></span>
-              <span>{marketControlOff ? "MARKNADSKONTROLL AV" : marketStatus?.isOpen ? "MARKNAD ÖPPEN" : "MARKNAD STÄNGD"}</span>
-            </div>
-            <div>{clock.toLocaleTimeString("sv-SE")}</div>
-          </div>
+  return <main className="min-h-screen text-slate-200 p-4 md:p-8">
+    <div className="max-w-3xl mx-auto space-y-5">
+      <header>
+        <p className="text-xs tracking-widest text-cyan-400">SWINGTRADING // ANALYSFÖRHANDSVISNING</p>
+        <h1 className="text-2xl font-semibold mt-2">Sannolikhetsterminal</h1>
+        <p className="text-sm text-slate-400 mt-2">Ett analysflöde. Tydligt beslut. Hellre avstå än gissa.</p>
+      </header>
+      <nav className="flex flex-wrap gap-2" aria-label="Analysläge">
+        <button aria-pressed={mode === "scan"} className={CONTROL} onClick={() => { invalidate(); setMode("scan"); }}>Skanna marknaden</button>
+        <button aria-pressed={mode === "analysis"} className={CONTROL} onClick={() => { invalidate(); setMode("analysis"); }}>Analysera en aktie</button>
+      </nav>
+      <section className="border border-cyan-900 rounded-lg p-4 space-y-3" aria-label="Starta analys">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {mode === "analysis" && <label className="text-xs text-slate-400">Aktie / ticker
+            <input className={`${CONTROL} block w-full mt-1`} value={ticker} onChange={(event) => changeTicker(event.target.value)} placeholder="t.ex. NVDA" maxLength={20} />
+          </label>}
+          <label className="text-xs text-slate-400">Tidshorisont
+            <select className={`${CONTROL} block w-full mt-1`} value={horizon} onChange={(event) => { invalidate(); setHorizon(event.target.value); }}>
+              <option value="week">Swing · 1–5 handelsdagar</option><option value="day">Daytrade · under dagen</option>
+            </select>
+          </label>
+          <label className="text-xs text-slate-400">Marknad (välj aktiens börs)
+            <select className={`${CONTROL} block w-full mt-1`} value={market} onChange={(event) => { invalidate(); setMarket(event.target.value); }}>
+              <option value="usa">USA</option><option value="stockholm">Sverige · Stockholm</option><option value="off">Av · endast analys</option>
+            </select>
+          </label>
         </div>
-
-        <div className="border border-cyan-800 p-4 mb-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <label htmlFor="market" className="block text-xs text-cyan-700 tracking-widest mb-2">— VALD MARKNAD —</label>
-              <select
-                id="market"
-                value={market}
-                onChange={handleMarketChange}
-                className="border border-cyan-700 bg-black px-3 py-2 text-sm text-cyan-300 outline-none focus:border-cyan-400"
-              >
-                <option value="stockholm">Nasdaq Stockholm</option>
-                <option value="usa">USA (Nasdaq/NYSE)</option>
-                <option value="off">Av</option>
-              </select>
-            </div>
-            <div className={`text-xs tracking-wider ${marketControlOff ? "text-cyan-500" : marketStatus?.isOpen ? "text-green-400" : "text-cyan-600"}`}>
-              {marketControlOff
-                ? "○ AV · ALLA FUNKTIONER TILLGÄNGLIGA"
-                : !marketStatus
-                  ? "KONTROLLERAR STATUS..."
-                  : marketStatus.isOpen
-                    ? `● ÖPPEN · ${marketStatus.hours}`
-                    : `○ STÄNGD · ${marketStatus.hours}`}
-            </div>
-          </div>
-          {marketStatus && !marketStatus.isOpen && (
-            <p className="mt-3 text-xs text-cyan-700 leading-relaxed">
-              AI-analyser och sannolikhetsberäkningar är pausade tills den valda marknaden öppnar.
-            </p>
-          )}
-        </div>
-{/* Ticker / stock selector */}
-<div className="border border-cyan-800 p-4 mb-6">
-  <div className="text-xs text-cyan-700 mb-3 tracking-widest">
-    — AKTIE / TICKER —
-  </div>
-
-  <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
-    Ange vilken aktie analysen gäller. Samma ticker används för signal,
-    nyheter och loggning.
-  </p>
-
-  <input
-    type="text"
-    value={ticker}
-    onChange={(e) => setTicker(e.target.value)}
-    placeholder="t.ex. NVDA, AAPL, EVO"
-    className="w-full bg-black border border-cyan-900 focus:border-cyan-500 text-cyan-300 px-3 py-2 outline-none text-sm"
-  /><div className="mt-3 flex items-center gap-3">
-  <button
-    onClick={fetchMarketData}
-    disabled={marketDataLoading || !ticker.trim()}
-    className="border border-cyan-500 text-cyan-300 px-4 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
-  >
-    {marketDataLoading ? "HÄMTAR..." : "HÄMTA MARKNADSDATA >"}
-  </button>
-
-  {marketData && (
-    <div className="text-xs text-green-400">
-      {marketData.ticker} · {marketData.price}
+        {mode === "analysis" && <button className="rounded bg-cyan-300 text-slate-950 px-5 py-3 font-semibold disabled:opacity-40" disabled={busy || !normalizeTicker(ticker) || Boolean(image && !image.confirmed)} onClick={() => start()}>{busy ? "Hämtar data och analyserar…" : "Starta analys"}</button>}
+        <p className="text-xs text-slate-400">Nyheter hämtas även när börsen är stängd.</p>
+        {market === "off" && <p className="text-xs text-amber-300">Marknadskontrollen är av för analysen. Detta ändrar inte datakällans börs och kringgår inte riskregler eller TRADE-spärren.</p>}
+        {mode === "analysis" && <Details title="valfri graf">
+          <p>Tickern måste vara korrekt. En uppladdad bild bevisar inte vilket instrument den visar.</p>
+          <input ref={fileInput} type="file" accept="image/*" disabled={!normalizeTicker(ticker) || busy} onChange={selectImage} />
+          {image && <><img src={image.preview} alt={`Graf som användaren kopplat till ${normalizeTicker(ticker)}`} className="max-h-64 w-full object-contain" /><button className={CONTROL} onClick={() => { invalidate(); setImage(null); fileInput.current.value = ""; }}>Ta bort graf</button></>}
+          {image && <label className="block"><input type="checkbox" checked={image.confirmed} disabled={busy} onChange={(event) => { invalidate(); setImage({ ...image, confirmed: event.target.checked }); }} /> Jag bekräftar att grafen visar {normalizeTicker(ticker)}.</label>}
+        </Details>}
+      </section>
+      {mode === "scan" && <MarketScanner market={market} horizon={horizon} onSaved={refreshHistory} onAnalyze={(item) => {
+        invalidate(); setMode("analysis"); setTicker(item.symbol); setExchange(item.exchange); setImage(null);
+        if (fileInput.current) fileInput.current.value = "";
+        void start(item);
+      }} />}
+      {notice && <p role="status" className="text-sm text-amber-300">{notice}</p>}
+      {result && <section className="border border-cyan-900 rounded-lg p-4" aria-label="Samlad analys">
+        <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className="text-cyan-300 font-bold">{LABELS[result.decision.status]}</span></div>
+        <ul className="text-sm text-slate-300 mt-3 space-y-1 list-disc pl-5">{result.decision.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+        {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
+        <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : "Inte sparat i journalen."}</p>
+        {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
+        <Details title="nyheter, graf och data">
+          <h3 className="font-semibold">Nyhetsanalys</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || "Nyhetsanalys saknas."}</p>
+          {result.news?.magnitude_note && <p>{result.news.magnitude_note}</p>}
+          <ul className="list-disc pl-5">{result.news?.key_news?.map((item, index) => <li key={index}>[{item.impact}] {item.headline}</li>)}</ul>
+          <p className="text-xs text-slate-400">AI:ns riktningssäkerhet: {result.news?.direction_confidence ?? "saknas"}. Detta är inte uppmätt träffsäkerhet eller sannolikhet för vinst.</p>
+          {result.chartError && <p>Grafanalys: {result.chartError}</p>}
+          <h3 className="font-semibold">Fullständig analysoutput och datasnapshot</h3>
+          <pre className="text-xs whitespace-pre-wrap break-all max-h-96 overflow-auto">{JSON.stringify({ news: result.news, chart: result.chart, marketData: result.marketData }, null, 2)}</pre>
+        </Details>
+      </section>}
+      <section className="border border-slate-800 rounded-lg p-4" aria-label="Journal">
+        <div className="flex justify-between items-center"><h2 className="font-semibold">Senaste analyser och trades</h2><button className={CONTROL} disabled={historyLoading} onClick={refreshHistory}>{historyLoading ? "Hämtar…" : "Uppdatera"}</button></div>
+        <p className="text-xs text-amber-300 mt-3">Nuvarande inloggning är gemensam. Journalen är inte personlig ännu. Analysförslag räknas inte som genomförda trades eller vinster.</p>
+        {historyError && <p role="alert" className="text-sm text-red-300 mt-3">Journalen kunde inte hämtas: {historyError}</p>}
+        {!historyError && !historyLoading && !history.length && <p className="text-sm text-slate-400 mt-3">Inga sparade poster.</p>}
+        <div className="mt-3 divide-y divide-slate-800">{history.slice(0, 5).map((trade) => {
+          const analysis = trade.signal_inputs?.record_type === "ANALYSIS";
+          const scan = trade.signal_inputs?.record_type === "SCAN";
+          const decision = trade.signal_inputs?.decision;
+          return <article key={trade.trade_id} className="py-3 text-sm">
+            <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? LABELS[decision?.status] || "NO TRADE" : `Äldre post · ${trade.signal}`}</span></div>
+            <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}` : analysis ? "Analysförslag" : trade.trade_status}</p>
+            {!analysis && trade.trade_status === "CLOSED" && Number.isFinite(trade.result_percent) && <p>Registrerat utfall: {trade.result_percent.toFixed(2)}%</p>}
+            <Details title="journalpost"><pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto">{JSON.stringify(trade, null, 2)}</pre></Details>
+          </article>;
+        })}</div>
+      </section>
+      <footer className="text-xs text-slate-500">Prototyp, inte en validerad handelsstrategi. Risk Engine, personlig tradeuppföljning och produktdata för derivat återstår. Ingen träffsäkerhet utlovas.</footer>
     </div>
-  )}
-</div>
-
-{marketDataError && (
-  <div className="mt-2 text-xs text-red-400">
-    {marketDataError}
-  </div>
-)}
-</div>
-        {/* Image analysis panel */}
-        <div className="border border-cyan-800 p-4 mb-6">
-          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— AI-BILDANALYS (VALFRITT) —</div>
-          <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
-            Klistra in eller ladda upp en bild på en kursgraf. AI:n läser av trenden, markerar identifierade tekniska
-            mönster direkt i grafen och fyller i volatilitet och momentum åt dig nedan.
-          </p>
-
-          {!imagePreview && (
-            <label className="block border border-dashed border-cyan-800 hover:border-cyan-500 p-6 text-center cursor-pointer transition-colors">
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
-              <span className="text-xs text-cyan-600 tracking-widest">+ VÄLJ BILD PÅ KURSGRAF</span>
-            </label>
-          )}
-
-          {imagePreview && (
-            <div className="space-y-3">
-              <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-start">
-                <div className="relative flex-1 min-w-0 overflow-hidden border border-cyan-800 bg-black">
-                  <img src={imagePreview} alt="Uppladdad graf" className="block w-full max-h-80 object-contain" />
-                  {patternMarker && (
-                    <div className="absolute inset-0 pointer-events-none" aria-label={`AI-markerat mönster: ${patternMarker.label}`}>
-                      {patternMarker.box && (
-                        <div
-                          className="absolute border-2 border-cyan-300 bg-cyan-400/10 shadow-[0_0_12px_rgba(103,232,249,0.75)]"
-                          style={{
-                            left: `${patternMarker.box.left}%`,
-                            top: `${patternMarker.box.top}%`,
-                            width: `${patternMarker.box.width}%`,
-                            height: `${patternMarker.box.height}%`,
-                          }}
-                        />
-                      )}
-                      <div
-                        className="absolute max-w-[calc(100%_-_0.5rem)] border border-cyan-300 bg-black/90 px-2 py-1 text-[10px] font-bold tracking-widest text-cyan-200 shadow-[0_0_10px_rgba(103,232,249,0.5)]"
-                        style={
-                          patternMarker.box
-                            ? {
-                                left: `${patternMarker.box.left}%`,
-                                top: `${Math.max(0, patternMarker.box.top - 8)}%`,
-                              }
-                            : { left: "0.5rem", top: "0.5rem" }
-                        }
-                      >
-                        AI-MÖNSTER: {patternMarker.label.toUpperCase()}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="w-full md:w-44 space-y-2">
-                  <button
-                    onClick={analyzeImage}
-                    disabled={analyzing || (marketStatus && !marketStatus.isOpen)}
-                    className="w-full border border-cyan-500 text-cyan-300 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
-                  >
-                    {analyzing ? "ANALYSERAR GRAF..." : "ANALYSERA GRAF >"}
-                  </button>
-                  <button
-                    onClick={clearImage}
-                    className="w-full border border-cyan-900 text-cyan-700 py-2 text-xs tracking-widest hover:border-cyan-600 transition-colors"
-                  >
-                    TA BORT BILD
-                  </button>
-                </div>
-              </div>
-
-              {aiError && <div className="text-xs text-red-400 border border-red-900 p-2">{aiError}</div>}
-
-              {aiAnalysis && (
-                <div className="border border-cyan-900 p-3 text-xs space-y-1.5">
-                  <div className="text-cyan-300">
-                    TREND: <span className="text-cyan-100">{momentumLabel}</span> · AI-SANNOLIKHET UPP:{" "}
-                    <span className="text-cyan-100">{aiAnalysis.confidence}%</span>
-                  </div>
-                  {aiAnalysis.reasoning && (
-                    <div className="text-cyan-500 leading-relaxed">
-                      <span className="text-cyan-700">MOTIVERING: </span>
-                      {aiAnalysis.reasoning}
-                    </div>
-                  )}
-                  {aiAnalysis.commentary && <div className="text-cyan-600 leading-relaxed">{aiAnalysis.commentary}</div>}
-                  {aiAnalysis.chart_type && (
-                    <div className="text-cyan-800">Graftyp identifierad: {aiAnalysis.chart_type}</div>
-                  )}
-                  {aiAnalysis.premarket_detected && (
-                    <div className="border border-cyan-900 bg-cyan-950/40 px-2 py-1.5 text-cyan-500 leading-relaxed">
-                      <span className="text-cyan-700">FÖRHANDEL/EFTERHANDEL UPPTÄCKT</span>
-                      {typeof aiAnalysis.premarket_move_pct === "number" && (
-                        <span> ({aiAnalysis.premarket_move_pct > 0 ? "+" : ""}{aiAnalysis.premarket_move_pct}%)</span>
-                      )}
-                      {aiAnalysis.premarket_notes && <div>{aiAnalysis.premarket_notes}</div>}
-                      <div className="text-cyan-800">
-                        Endast informativt — vägs inte in i sannolikheten eftersom förhandel har tunnare volym.
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis.candlestick_pattern && aiAnalysis.candlestick_reasoning && (
-                    <div className="text-cyan-500 leading-relaxed">
-                      <span className="text-cyan-700">CANDLESTICK-MÖNSTER ({aiAnalysis.candlestick_pattern}): </span>
-                      {aiAnalysis.candlestick_reasoning}
-                    </div>
-                  )}
-                  {aiAnalysis.amd_reasoning && (
-                    <div className="text-cyan-500 leading-relaxed">
-                      <span className="text-cyan-700">
-                        AMD ({aiAnalysis.amd_phase === "unclear" || !aiAnalysis.amd_phase ? "otydligt" : aiAnalysis.amd_phase}):{" "}
-                      </span>
-                      {aiAnalysis.amd_reasoning}
-                      <span className="text-cyan-800"> — används endast om den håller med övriga metoder.</span>
-                    </div>
-                  )}
-                  <div className="text-cyan-800 pt-1 border-t border-cyan-900">
-                    Automatiskt ifyllt:{" "}
-                    {aiAnalysis.price_detected ? `pris ${aiAnalysis.price_detected}, ` : "pris ej avläsbart (fyll i manuellt), "}
-                    volatilitet, drift och momentum. Justera valfritt fält nedan innan du kör simuleringen.
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* News analysis panel */}
-        <div className="border border-cyan-800 p-4 mb-6">
-          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— NYHETSANALYS FÖR AKTIE (VALFRITT) —</div>
-          <p className="text-xs text-cyan-600 mb-3 leading-relaxed">
-            Skriv in en ticker/bolagsnamn. AI:n söker efter aktuella nyheter med trolig, relativt precis påverkan på
-            just den aktien under din valda hållperiod ({horizonAmount} {UNIT_LABELS[horizonUnit]}) — bra för
-            hävstångscertifikat där riktningens säkerhet spelar större roll än rörelsens storlek.
-          </p>
-          <div>
-            
-            <button
-              onClick={analyzeNews}
-               disabled={newsAnalyzing || !ticker.trim() || (marketStatus && !marketStatus.isOpen)}
-              className="border border-cyan-500 text-cyan-300 px-4 py-2 text-xs tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
-            >
-              {newsAnalyzing ? "SÖKER..." : "SÖK NYHETER >"}
-            </button>
-          </div>
-
-          {newsError && <div className="text-xs text-red-400 border border-red-900 p-2 mt-3">{newsError}</div>}
-
-          {newsAnalysis && (
-            <div className="border border-cyan-900 p-3 text-xs space-y-1.5 mt-3">
-              <div className="flex justify-between items-start">
-                <div className="text-cyan-300">
-                  RIKTNING:{" "}
-                  <span className="text-cyan-100">
-                    {newsAnalysis.direction === "upp" ? "UPP" : newsAnalysis.direction === "ner" ? "NER" : "OKLART"}
-                  </span>{" "}
-                  · SÄKERHET: <span className="text-cyan-100">{newsAnalysis.confidence}%</span>
-                </div>
-                <button onClick={clearNews} className="text-cyan-800 hover:text-cyan-500 text-xs">
-                  RENSA
-                </button>
-              </div>
-              {newsAnalysis.magnitude_note && (
-                <div className="text-cyan-600 leading-relaxed">
-                  <span className="text-cyan-700">FÖRVÄNTAD STORLEK: </span>
-                  {newsAnalysis.magnitude_note}
-                </div>
-              )}
-              {newsAnalysis.reasoning && (
-                <div className="text-cyan-500 leading-relaxed">
-                  <span className="text-cyan-700">MOTIVERING: </span>
-                  {newsAnalysis.reasoning}
-                </div>
-              )}
-              {Array.isArray(newsAnalysis.key_news) && newsAnalysis.key_news.length > 0 && (
-                <ul className="text-cyan-600 leading-relaxed list-disc list-inside space-y-0.5">
-                  {newsAnalysis.key_news.map((n, i) => (
-                    <li key={i}>
-                      <span
-                        className={
-                          n.impact === "positiv" ? "text-green-400" : n.impact === "negativ" ? "text-red-400" : "text-cyan-500"
-                        }
-                      >
-                        [{n.impact}]
-                      </span>{" "}
-                      {n.headline}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {newsAnalysis.direction === "oklart" && (
-                <div className="text-cyan-800 pt-1 border-t border-cyan-900">
-                  Inga tydliga bolagsspecifika nyheter hittades — vägs därför inte in i simuleringen.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Input panel */}
-        <div className="border border-cyan-800 p-4 mb-6">
-          <div className="text-xs text-cyan-700 mb-3 tracking-widest">— INDATA —</div>
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="PRIS" value={price} onChange={setPrice} min={1} step={1} suffix="" />
-            <Field label="VOLATILITET" value={vol} onChange={setVol} min={1} max={150} step={1} suffix="%" />
-            <Field label="DRIFT (ÅRLIG)" value={drift} onChange={setDrift} min={-100} max={100} step={1} suffix="%" />
-          </div>
-
-          <div className="mt-4">
-            <div className="text-xs text-cyan-700 mb-2 tracking-widest">HÅLLPERIOD</div>
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {HORIZON_PRESETS.map((h) => {
-                const active = horizonAmount === h.amount && horizonUnit === h.unit;
-                return (
-                  <button
-                    key={h.label}
-                    onClick={() => {
-                      setHorizonAmount(h.amount);
-                      setHorizonUnit(h.unit);
-                    }}
-                    className={`border px-2 py-2 text-xs tracking-widest transition-colors ${
-                      active ? "border-cyan-400 bg-cyan-950 text-cyan-300" : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
-                    }`}
-                  >
-                    {h.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-2">
-              <div className="flex items-center border border-cyan-900 focus-within:border-cyan-500 flex-1">
-                <input
-                  type="number"
-                  value={horizonAmount}
-                  min={0.1}
-                  step={0.1}
-                  onChange={(e) => setHorizonAmount(Math.max(0.1, Number(e.target.value)))}
-                  className="w-full bg-black text-cyan-300 px-2 py-2 outline-none text-sm"
-                />
-              </div>
-              <select
-                value={horizonUnit}
-                onChange={(e) => setHorizonUnit(e.target.value)}
-                className="border border-cyan-900 bg-black text-cyan-300 px-2 py-2 text-sm outline-none focus:border-cyan-500"
-              >
-                {Object.entries(UNIT_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="text-xs text-cyan-800 mt-1">
-              Egen hållperiod ner till enstaka minuter, för daytrading (upp till en handelsdag, ca 6,5h).
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <div className="text-xs text-cyan-700 mb-2 tracking-widest">MOMENTUM (MANUELLT ELLER FRÅN AI-ANALYS)</div>
-            <div className="flex gap-2">
-              {["bearish", "neutral", "bullish"].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMomentum(m)}
-                  className={`flex-1 border px-2 py-2 text-xs tracking-widest transition-colors ${
-                    momentum === m
-                      ? "border-cyan-400 bg-cyan-950 text-cyan-300"
-                      : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
-                  }`}
-                >
-                  {m === "bearish" ? "NEDÅT" : m === "neutral" ? "SIDLED" : "UPPÅT"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <div className="text-xs text-cyan-700 mb-2 tracking-widest">DIN TES: BULL ELLER BEAR?</div>
-            <div className="flex gap-2">
-              {["bull", "bear"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setThesis(t)}
-                  className={`flex-1 border px-2 py-2 text-xs tracking-widest transition-colors ${
-                    thesis === t
-                      ? t === "bull"
-                        ? "border-green-500 bg-green-950 text-green-300"
-                        : "border-red-500 bg-red-950 text-red-300"
-                      : "border-cyan-900 text-cyan-700 hover:border-cyan-600"
-                  }`}
-                >
-                  {t === "bull" ? "BULL (TROR PÅ UPPGÅNG)" : "BEAR (TROR PÅ NEDGÅNG)"}
-                </button>
-              ))}
-            </div>
-            <div className="text-xs text-cyan-800 mt-1">
-              Bara en markering av vad du hoppas/tror på — påverkar inte AI:ns analys, bara hur resultatet
-              lyfts fram nedan.
-            </div>
-          </div>
-
-          <button
-            onClick={runSimulation}
-            disabled={running || (marketStatus && !marketStatus.isOpen)}
-            className="mt-5 w-full border border-cyan-500 text-cyan-300 py-3 tracking-widest hover:bg-cyan-950 disabled:opacity-50 transition-colors"
-          >
-            {running ? `KÖR SIMULERING... ${Math.floor(progress)}%` : "KÖR SIMULERING >"}
-          </button>
-          {simulationMessage && (
-            <div className="mt-3 border border-cyan-900 p-2 text-xs text-cyan-600">{simulationMessage}</div>
-          )}
-          {running && (
-            <div className="h-1 bg-cyan-950 mt-2 overflow-hidden">
-              <div className="h-full bg-cyan-400 transition-all duration-75" style={{ width: `${progress}%` }} />
-            </div>
-          )}
-        </div>
-
-        {/* Results */}
-        {result && (
-          <div className="border border-cyan-800 p-4 space-y-6">
-            <div className="text-xs text-cyan-700 tracking-widest">
-              — RESULTAT ({result.nsim.toLocaleString("sv-SE")} SIMULERADE UTFALL) —
-            </div>
-
-            {/* Gauge */}
-            <div className="flex flex-col items-center py-2">
-              <svg width="220" height="130" viewBox="0 0 220 130">
-                <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke="#78350f" strokeWidth="10" />
-                <path
-                  d="M 20 110 A 90 90 0 0 1 200 110"
-                  fill="none"
-                  stroke={result.ensemble >= 55 ? "#4ade80" : result.ensemble <= 45 ? "#f87171" : "#fbbf24"}
-                  strokeWidth="10"
-                  strokeDasharray={`${(result.ensemble / 100) * 283} 283`}
-                />
-                <line
-                  x1="110"
-                  y1="110"
-                  x2="110"
-                  y2="35"
-                  stroke="#fbbf24"
-                  strokeWidth="2"
-                  style={{
-                    transform: `rotate(${gaugeAngle}deg)`,
-                    transformOrigin: "110px 110px",
-                    transition: "transform 0.6s ease-out",
-                  }}
-                />
-                <circle cx="110" cy="110" r="4" fill="#fbbf24" />
-              </svg>
-              <div className={`text-4xl font-bold -mt-2 ${verdictColor(result.ensemble)}`}>
-                {result.ensemble.toFixed(1)}%
-              </div>
-              <div className={`text-xs tracking-widest mt-1 ${verdictColor(result.ensemble)}`}>
-                {verdictText(result.ensemble)} — SANNOLIKHET FÖR UPPGÅNG OM {result.horizonLabel}
-              </div>
-              <div className="flex gap-6 mt-3 text-sm">
-                <div className={`text-center ${result.thesis === "bull" ? "opacity-100" : "opacity-50"}`}>
-                  <div className="text-green-400 font-bold">{result.ensemble.toFixed(1)}%</div>
-                  <div className="text-cyan-800 text-xs tracking-widest">UPP (BULL){result.thesis === "bull" ? " ← DIN TES" : ""}</div>
-                </div>
-                <div className={`text-center ${result.thesis === "bear" ? "opacity-100" : "opacity-50"}`}>
-                  <div className="text-red-400 font-bold">{(100 - result.ensemble).toFixed(1)}%</div>
-                  <div className="text-cyan-800 text-xs tracking-widest">NER (BEAR){result.thesis === "bear" ? " ← DIN TES" : ""}</div>
-                </div>
-              </div>
-              <div
-                className={`mt-3 text-xs border px-3 py-1.5 ${
-                  (result.thesis === "bull" ? result.ensemble : 100 - result.ensemble) >= 55
-                    ? "border-green-900 text-green-400"
-                    : (result.thesis === "bull" ? result.ensemble : 100 - result.ensemble) <= 45
-                    ? "border-red-900 text-red-400"
-                    : "border-cyan-900 text-cyan-600"
-                }`}
-              >
-                Din {result.thesis === "bull" ? "BULL" : "BEAR"}-tes stöds till{" "}
-                {(result.thesis === "bull" ? result.ensemble : 100 - result.ensemble).toFixed(1)}% av modellen
-              </div>
-            </div>
-
-            {/* Breakdown */}
-            <div
-              className="grid gap-3 text-center border-t border-b border-cyan-900 py-3"
-              style={{
-                gridTemplateColumns: `repeat(${2 + (result.weights.ai > 0 ? 1 : 0) + (result.weights.news > 0 ? 1 : 0) + (result.weights.amd > 0 ? 1 : 0)}, minmax(0, 1fr))`,
-              }}
-            >
-              <div>
-                <div className="text-xs text-cyan-700">MONTE CARLO</div>
-                <div className="text-lg text-cyan-300">{result.mcProb.toFixed(1)}%</div>
-                <div className="text-xs text-cyan-800">vikt {result.weights.mc}%</div>
-              </div>
-              <div>
-                <div className="text-xs text-cyan-700">MOMENTUM</div>
-                <div className="text-lg text-cyan-300">{result.momentumScore.toFixed(1)}%</div>
-                <div className="text-xs text-cyan-800">vikt {result.weights.momentum}%</div>
-              </div>
-              {result.weights.ai > 0 && (
-                <div>
-                  <div className="text-xs text-cyan-700">AI-BILDANALYS</div>
-                  <div className="text-lg text-cyan-300">{result.aiScore.toFixed(1)}%</div>
-                  <div className="text-xs text-cyan-800">vikt {result.weights.ai}%</div>
-                </div>
-              )}
-              {result.weights.news > 0 && (
-                <div>
-                  <div className="text-xs text-cyan-700">NYHETSANALYS</div>
-                  <div className="text-lg text-cyan-300">{result.newsScore.toFixed(1)}%</div>
-                  <div className="text-xs text-cyan-800">vikt {result.weights.news}%</div>
-                </div>
-              )}
-              {result.weights.amd > 0 && (
-                <div>
-                  <div className="text-xs text-cyan-700">AMD (BACKUP)</div>
-                  <div className="text-lg text-green-400">{result.amdConfidence.toFixed(1)}%</div>
-                  <div className="text-xs text-cyan-800">vikt {result.weights.amd}%</div>
-                </div>
-              )}
-            </div>
-
-            {/* AMD status line - always visible when a chart was analyzed, so it's clear when AMD was NOT used */}
-            {result.amdStatus !== "none" && (
-              <div
-                className={`text-xs border px-3 py-2 ${
-                  result.amdStatus === "confirmed"
-                    ? "border-green-900 text-green-400"
-                    : "border-cyan-900 text-cyan-700"
-                }`}
-              >
-                {result.amdStatus === "confirmed" &&
-                  `AMD-mönster (${result.amdPhase}) bekräftar samma riktning som övriga metoder — vägdes in med 20%.`}
-                {result.amdStatus === "contradicted" &&
-                  `AMD-mönster (${result.amdPhase}) pekade åt motsatt håll mot övriga metoder — ignorerades.`}
-                {result.amdStatus === "unclear" &&
-                  "AMD-mönster kunde inte identifieras tydligt i grafen — ignorerades."}
-              </div>
-            )}
-
-            <div className="flex justify-between text-xs text-cyan-600">
-              <span>P(rörelse &gt; +5%): {result.bigUpPct.toFixed(1)}%</span>
-              <span>P(rörelse &gt; -5%): {result.bigDownPct.toFixed(1)}%</span>
-            </div>
-
-            {/* Histogram */}
-            <div>
-              <div className="text-xs text-cyan-700 mb-2 tracking-widest">FÖRDELNING AV SIMULERADE SLUTPRISER</div>
-              <ResponsiveContainer width="100%" height={140}>
-                <BarChart data={result.histogram}>
-                  <XAxis dataKey="x" tick={false} axisLine={{ stroke: "#78350f" }} />
-                  <YAxis hide />
-                  <ReferenceLine x={price} stroke="#fbbf24" strokeDasharray="3 3" />
-                  <Bar dataKey="count">
-                    {result.histogram.map((entry, i) => (
-                      <Cell key={i} fill={entry.isUp ? "#4ade80" : "#f87171"} fillOpacity={0.7} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="text-xs text-cyan-800 text-center mt-1">
-                streckad linje = nuvarande pris ({price})
-              </div>
-            </div>
-
-            <div className="border-t border-cyan-900 pt-3 text-xs text-cyan-700 leading-relaxed">
-              OBS: siffran ovan är en simulering baserad på dina antaganden om volatilitet och drift, en förenklad
-              momentum-modell, och (om använda) en AI-bedömning av en graf-bild samt en nyhetsbaserad bedömning av
-              enskild aktie. Den är inte kalibrerad mot verkliga utfall och utgör inte finansiell rådgivning.
-              Hävstångscertifikat förstärker både vinster och förluster - en hög "säkerhet" i modellen är fortfarande
-              ingen garanti, och en felbedömning slår hårdare med hävstång. Historiska mönster och simulerad statistik
-              förutsäger inte framtida kursrörelser med någon garanti.
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  </main>;
 }
-
-function Field({ label, value, onChange, min, max, step, suffix }) {
-  return (
-    <div>
-      <div className="text-xs text-cyan-700 mb-1">{label}</div>
-      <div className="flex items-center border border-cyan-900 focus-within:border-cyan-500">
-        <input
-          type="number"
-          value={value}
-          min={min}
-          max={max}
-          step={step}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full bg-black text-cyan-300 px-2 py-2 outline-none text-sm"
-        />
-        {suffix && <span className="pr-2 text-cyan-700 text-xs">{suffix}</span>}
-      </div>
-    </div>
-  );
-}
-
