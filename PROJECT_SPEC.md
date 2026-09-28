@@ -14,12 +14,22 @@
 - Ingen automatisk orderläggning eller självlärande strategiändring.
 
 Första etappen implementerar kompakt analys och befintlig gemensam journal.
-Personlig identitet, utfallsregistrering och validerad quant/risk återstår.
+Personlig identitet och validerad quant/risk återstår. Manuell registrering av
+verkliga aktieaffärer och stängning med resultat efter avgifter finns nu i den
+gemensamma journalen; det är användarens affär, inte ett botgodkänt beslut.
+Swinganalys visar experimentella pullback-/breakout-bevakningsregler på stängda
+dagsljus. Provisorisk ATR-stop, 2R-målnivå och aktieantal från användarens eget
+kapital/riskprocent visas som kalkyl. Marknadsindexfilter, relativ styrka och
+historisk validering saknas; kalkylen kan inte godkänna TRADE.
 Screeningens första experimentella version är nu implementerad för ett
 budgetbegränsat, dagligt varierat aktieurval. EMA20/50, ATR, momentum och RVOL
 gallrar kandidater utan TRADE-godkännande. Nyheter hämtas för högst tre
 kandidater och SCAN-rapporter hålls isär från faktiska trades. Global kvot,
 fullständigare urval, produktdata och validerad strategi återstår.
+
+API-hanteringen rapporterar saknade Anthropic-nycklar, providerfel och timeout
+tydligare. `vercel.json` sätter funktionsgränser. Live-provider- och Supabase-
+anslutningar kräver konfigurerade serverhemligheter och är inte kodtestade.
 
 ### Version
 0.1 – Grundspecifikation

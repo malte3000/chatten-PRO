@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateReadiness, createAnalysisRecord } from "../src/analysisModel.js";
+import { evaluateReadiness, createAnalysisRecord, createRealTradeRecord } from "../src/analysisModel.js";
 
 const marketData = {
   ticker: "NVDA", price: 100, validation: { valid: true },
@@ -36,4 +36,14 @@ test("analysis observations retain WAIT but are not actual trades", () => {
   assert.equal(record.winner, null);
   assert.equal(record.confidence, 0);
   assert.equal(record.trade_id, "NVDA-fixed");
+});
+
+test("analysis and manually logged trade retain experimental strategy version and source", () => {
+  const strategy = { version: "swing-v-test", status: "WATCH", setups: ["PULLBACK"] };
+  const record = createAnalysisRecord({ ...input, horizon: "week", market: "usa", decision: evaluateReadiness(input), strategy }, { now: new Date("2026-09-16T12:00:00Z"), id: "fixed" });
+  assert.equal(record.strategy_version, "swing-v-test");
+  const trade = createRealTradeRecord({ analysis: { ticker: "NVDA", horizon: "week", market: "usa", strategy, record, marketData }, direction: "LONG", entryPrice: 100, stopLoss: 95, target: 110, positionSize: 2, fees: 1 }, { now: new Date("2026-09-16T12:01:00Z"), id: "real" });
+  assert.equal(trade.strategy_version, "swing-v-test");
+  assert.equal(trade.signal_inputs.source_analysis_trade_id, record.trade_id);
+  assert.deepEqual(trade.signal_inputs.strategy, strategy);
 });

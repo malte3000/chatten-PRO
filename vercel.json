@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/analyze-news.js": { "maxDuration": 60 },
+    "api/analyze-image.js": { "maxDuration": 60 },
+    "api/market-data.js": { "maxDuration": 20 },
+    "api/scan.js": { "maxDuration": 30 },
+    "api/trades.js": { "maxDuration": 30 }
+  }
+}

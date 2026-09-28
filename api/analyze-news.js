@@ -1,5 +1,6 @@
 import { isAuthenticated } from "./_auth.js";
 import { getMarketStatus } from "./_market-hours.js";
+import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
 
 export default async function handler(req, res) {
    if (!isAuthenticated(req)) {
@@ -13,6 +14,10 @@ export default async function handler(req, res) {
   }
 
   try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "ANTHROPIC_API_KEY saknas på servern." });
+    }
     const { ticker, companyName = "", exchange = "", horizonText, market = "stockholm" } = req.body || {};
 
     if (!ticker || !ticker.trim()) {
@@ -28,7 +33,7 @@ export default async function handler(req, res) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
 
@@ -117,21 +122,28 @@ Skriv all text på svenska.
           },
         ],
       }),
+      signal: AbortSignal.timeout(50000),
     });
 
-    const data = await response.json();
+    const data = await readProviderJson(response);
 
-    if (!response.ok) {
+    if (!response.ok || !data) {
       console.error("Anthropic error:", data);
 
-      return res.status(response.status).json({
+      return res.status(response.ok ? 502 : response.status).json({
         error: "Anthropic API error",
-        details: data,
+        message: providerErrorMessage(data, response.ok ? "Anthropic returnerade ett ogiltigt svar." : "Anthropic kunde inte slutföra förfrågan."),
       });
     }
 
     if (data.stop_reason === "pause_turn" || data.stop_reason === "max_tokens") {
       return res.status(502).json({ error: "Nyhetsanalysen blev inte komplett. Ingen signal skapades." });
+    }
+
+    const searchFailed = Array.isArray(data.content) && data.content.some((block) =>
+      block?.type === "web_search_tool_result" && block.content?.type === "web_search_tool_result_error");
+    if (searchFailed) {
+      return res.status(502).json({ error: "Nyhetssökningen misslyckades. Färska nyheter kunde inte verifieras och ingen signal skapades." });
     }
 
     const textBlocks = (data.content || [])
@@ -165,9 +177,9 @@ Skriv all text på svenska.
   } catch (error) {
     console.error(error);
 
-    return res.status(500).json({
-      error: "Kunde inte analysera nyheterna",
-      message: error.message,
+    return res.status(isTimeoutError(error) ? 504 : 502).json({
+      error: isTimeoutError(error) ? "Tidsgränsen för nyhetsanalysen överskreds." : "Kunde inte analysera nyheterna",
+      message: isTimeoutError(error) ? "Anthropic svarade inte inom 50 sekunder." : error.message,
     });
   }
 }

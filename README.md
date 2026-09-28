@@ -18,9 +18,24 @@ AI-confidence används aldrig som uppgångssannolikhet. Ingen träffsäkerhet ä
 uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
 
+Manuell aktieanalys i swingläge visar nu även en experimentell pullback-/breakout-
+bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP, saknar än så
+läge marknadsindexfilter, relativ styrka och historisk validering. En WATCH kan
+visa provisorisk ATR-stop, 2R-målnivå och en kalkyl av högsta hela aktieantalet
+från användarens eget kapital och riskprocent. Detta är inte en validerad
+Risk Engine och kan inte godkänna TRADE.
+
 Nyhetsanalys körs även utanför öppettider. Ofullständiga (`pause_turn`,
 `max_tokens`) och felaktigt formaterade svar nekas säkert. Strukturerad
 provider-output och återupptagning av pausade sökningar är senare arbete.
+Även sökverktygsfel inuti ett HTTP 200-svar nekas. Grafbilder begränsas till
+JPEG, PNG, WebP och GIF, högst 3 MiB; bildanalys måste vara komplett och ha
+giltiga fält innan den visas som godkänd API-output.
+Anthropic-funktionerna rapporterar saknad servernyckel tydligt; Twelve Data har
+15 sekunders timeout, Anthropic 50 sekunder och Supabase 12 sekunder per anrop.
+`vercel.json` sätter funktionernas tidsgränser så långa nyhetssökningar får tid
+att slutföras. API-klienten visar begripligare fel även när deploymentplattformen
+svarar med HTML i stället för JSON.
 
 ## Marknadsskanner (experimentell första version)
 
@@ -77,16 +92,29 @@ Befintligt databasformat behålls: analysförslag har `signal=NO_TRADE`,
 ligger i `signal_inputs.decision`. `confidence=0` är en kompatibilitetsmarkör,
 inte en sannolikhet. Statistik måste skilja `record_type=ANALYSIS` från trades.
 
+En användare kan manuellt registrera en redan tagen aktieaffär från en analys
+med riktning, faktiskt ingångspris, antal, valfri stop/målnivå och ingångsavgift.
+Öppna manuella affärer kan stängas i journalen med utgångspris, utgångsavgift
+och avslutsorsak. Servern beräknar nettoresultat i procent och, om stop finns,
+R-resultat. Posten märks `record_type=REAL_TRADE` och länkas till analysen.
+Detta är journalföring av användarens affär; terminalens analys godkänner den inte.
+
 **Inloggningen använder ett gemensamt lösenord; journalen är gemensam.**
 Personlig historik kräver riktig användaridentitet, databasägarskap och
-serverkontroller/RLS. Öppna/stänga faktiska trades, avgifter och efteranalys
-återstår. Kodtester verifierar inte anslutningen till live-Supabase.
+serverkontroller/RLS. Kodtester verifierar inte anslutningen till live-Supabase.
+För en ny databas finns tabellformatet i [supabase/schema.sql](supabase/schema.sql).
+Kör det i Supabase SQL Editor innan journal-API:t används. Om `trades` redan
+finns ska dess kolumner jämföras med filen; `CREATE TABLE IF NOT EXISTS` ändrar
+inte en befintlig tabell.
 
 ## Körning och deployment
 
 Installera med npm install eller pnpm install. Kör npm test och npm run build.
 Det valfria `tests/uiSmoke.cjs` kräver Playwright och ett körande produktions-
 preview. Det använder endast simulerade API-svar, inte livekonton.
+Manuella anslutningskontroller och lokal UI-verifiering sparas lokalt i
+NIGHT_WORK_STATUS.md. Statusfilen och skärmbilder från kontrollerna ingår inte
+i den publicerade koden.
 npm run dev startar endast Vite; API kräver en serverlessmiljö, exempelvis
 Vercel CLI eller Vercel deployment.
 
@@ -98,7 +126,14 @@ Servermiljön behöver APP_LOGIN_PASSWORD, ANTHROPIC_API_KEY,
 TWELVE_DATA_API_KEY, SUPABASE_URL och SUPABASE_SECRET_KEY. Lägg aldrig
 hemligheter i frontend, VITE-variabler eller Git.
 
-Vercel Preview blockerar POST till journalen som standard även om miljön
+För lokal åtkomst finns [.env.example](.env.example). Kopiera till `.env.local`
+och fyll i lokalt. Filen är Git-ignorerad och måste läsas av backend-/testprocessen;
+den startar inga API-funktioner med bara Vite. Supabase stöder både ny servernyckel
+(`sb_secret_...`, endast `apikey`-header) och äldre `service_role`-JWT.
+Deployment kräver separat Vercel-projektåtkomst och tabelländringar separat
+Supabase SQL-/administrationsåtkomst.
+
+Vercel Preview blockerar skrivningar (POST/PATCH) till journalen som standard även om miljön
 ärver produktionsnycklar. Sparfel visas då medvetet i appen. Aktivera
 `PREVIEW_ALLOW_WRITES=true` endast efter att preview pekar på en separat
 testdatabas. Läsning och analys är fortfarande tillåtna och externa analyser
@@ -106,8 +141,9 @@ förbrukar API-krediter; ingen livekörning ingår i de automatiska testerna.
 
 ## Nästa etapper
 
-1. Användaridentitet och personlig journal med utfallsregistrering.
-2. Reproducerbara quant-indikatorer och separat Risk Engine.
+1. Användaridentitet och personlig journal.
+2. Separat Risk Engine med konfigurerbara riskgränser.
 3. Backtest, out-of-sample och paper trading före TRADE-aktivering.
-4. Utökad screening med bättre universumurval och distribuerade kvotjobb;
-   derivat kräver separat produktspecifik data och riskanalys.
+4. Relativ styrka/marknadsfilter för strategin samt utökad screening och
+   distribuerade kvotjobb. Derivat kräver separat produktspecifik data och
+   riskanalys.

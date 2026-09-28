@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { fetchJson } from "./apiClient.js";
 
 export default function LoginGate({ children }) {
   const [checking, setChecking] = useState(true);
@@ -13,12 +14,7 @@ export default function LoginGate({ children }) {
 
   async function checkSession() {
     try {
-      const response = await fetch("/api/session", {
-        method: "GET",
-        credentials: "include",
-      });
-
-      const data = await response.json();
+      const data = await fetchJson("/api/session");
 
       setAuthenticated(Boolean(data.authenticated));
     } catch (err) {
@@ -38,7 +34,7 @@ export default function LoginGate({ children }) {
     setError("");
 
     try {
-      const response = await fetch("/api/login", {
+      const data = await fetchJson("/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -48,12 +44,6 @@ export default function LoginGate({ children }) {
           password,
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Inloggningen misslyckades");
-      }
 
       setAuthenticated(true);
       setPassword("");

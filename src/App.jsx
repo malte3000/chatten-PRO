@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
-import { normalizeTicker, evaluateReadiness, createAnalysisRecord } from "./analysisModel.js";
+import { normalizeTicker, evaluateReadiness, createAnalysisRecord, createRealTradeRecord } from "./analysisModel.js";
+import { fetchJson } from "./apiClient.js";
+import { assessSwingSetup } from "./strategyModel.js";
+import { calculatePositionSize } from "./riskModel.js";
 import MarketScanner from "./MarketScanner.jsx";
 
 const LABELS = { TRADE: "TRADE", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 
 async function request(url, options = {}) {
-  const response = await fetch(url, { credentials: "include", ...options });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.message || data.error || "Förfrågan misslyckades");
-  return data;
+  return fetchJson(url, options);
 }
 
 function Details({ title, children }) {
@@ -17,6 +19,82 @@ function Details({ title, children }) {
     <summary className="cursor-pointer text-cyan-300">Se mer – {title}</summary>
     <div className="mt-3 space-y-3 text-slate-300">{children}</div>
   </details>;
+}
+
+function RealTradeForm({ analysis, onSave }) {
+  const [direction, setDirection] = useState("LONG");
+  const [entry, setEntry] = useState("");
+  const [stop, setStop] = useState("");
+  const [target, setTarget] = useState("");
+  const [size, setSize] = useState("");
+  const [fees, setFees] = useState("0");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  async function submit(event) {
+    event.preventDefault(); setError(""); setSaving(true);
+    try {
+      const record = createRealTradeRecord({ analysis, direction, entryPrice: entry, stopLoss: stop, target, positionSize: size, fees });
+      await onSave(record); setSaved(true);
+    } catch (problem) { setError(problem.message); }
+    finally { setSaving(false); }
+  }
+  return <Details title="registrera en faktisk trade">
+    <p>Manuell journalföring av en affär du själv redan har tagit. Terminalens beslut är inte en köp- eller säljsignal.</p>
+    {saved ? <p role="status">Faktisk trade sparad som öppen.</p> : <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+      <label>Riktning<select className={`${CONTROL} block w-full mt-1`} value={direction} onChange={(event) => setDirection(event.target.value)}><option value="LONG">Lång</option><option value="SHORT">Kort</option></select></label>
+      <label>Faktiskt ingångspris<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" required value={entry} onChange={(event) => setEntry(event.target.value)} /></label>
+      <label>Stoppris, om satt<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" value={stop} onChange={(event) => setStop(event.target.value)} /></label>
+      <label>Målpris, om satt<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" value={target} onChange={(event) => setTarget(event.target.value)} /></label>
+      <label>Antal aktier/enheter<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" required value={size} onChange={(event) => setSize(event.target.value)} /></label>
+      <label>Avgift vid ingång ({analysis.marketData?.currency || "kontovaluta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0" step="any" value={fees} onChange={(event) => setFees(event.target.value)} /></label>
+      {error && <p role="alert" className="sm:col-span-2 text-red-300">{error}</p>}
+      <button className="sm:col-span-2 rounded bg-cyan-300 text-slate-950 px-4 py-2 font-semibold disabled:opacity-40" disabled={saving}>{saving ? "Sparar…" : "Spara faktisk trade"}</button>
+    </form>}
+  </Details>;
+}
+
+function CloseTradeForm({ trade, onClose }) {
+  const [exit, setExit] = useState("");
+  const [fees, setFees] = useState("0");
+  const [reason, setReason] = useState("MANUAL");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event) {
+    event.preventDefault(); setError(""); setSaving(true);
+    try { await onClose({ trade_id: trade.trade_id, exit_price: Number(exit), fees: Number(fees), exit_reason: reason }); }
+    catch (problem) { setError(problem.message); }
+    finally { setSaving(false); }
+  }
+  return <Details title="registrera utgång">
+    <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+      <label>Faktiskt utgångspris<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" required value={exit} onChange={(event) => setExit(event.target.value)} /></label>
+      <label>Avgift vid utgång ({trade.signal_inputs?.currency || "kontovaluta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0" step="any" value={fees} onChange={(event) => setFees(event.target.value)} /></label>
+      <label>Avslutsorsak<select className={`${CONTROL} block w-full mt-1`} value={reason} onChange={(event) => setReason(event.target.value)}><option value="TARGET">Mål</option><option value="STOP_LOSS">Stop</option><option value="MANUAL">Manuellt</option><option value="TIME_EXIT">Tidsgräns</option><option value="SIGNAL_REVERSAL">Signal vände</option><option value="END_OF_DAY">Sessionsslut</option><option value="OTHER">Annat</option></select></label>
+      {error && <p role="alert" className="sm:col-span-2 text-red-300">{error}</p>}
+      <button className="sm:col-span-2 border border-cyan-700 rounded px-4 py-2 disabled:opacity-40" disabled={saving}>{saving ? "Sparar…" : "Stäng och beräkna utfall"}</button>
+    </form>
+    <p className="text-xs text-slate-500">Nettoresultat beräknas från riktning, priser, storlek samt ingångs- och utgångsavgifter.</p>
+  </Details>;
+}
+
+function RiskCalculator({ plan, currency }) {
+  const [capital, setCapital] = useState("");
+  const [riskPercent, setRiskPercent] = useState("");
+  const [fees, setFees] = useState("0");
+  const calculation = calculatePositionSize({ capital, riskPercent, entry: plan.entry_reference, stop: plan.stop, estimatedFees: fees });
+  const money = (value) => `${Number(value).toFixed(2)} ${currency || "valuta"}`;
+  return <Details title={`${plan.setup === "PULLBACK" ? "pullback" : "breakout"} · provisorisk riskplan`}>
+    <p>Referenspris {money(plan.entry_reference)} · tänkt stop {money(plan.stop)} · teoretiskt mål {money(plan.target)} · 2R före kostnader. Nivåerna kommer från ett oprövat regelutkast och behöver räknas om vid aktuell prisdata.</p>
+    <div className="grid gap-3 sm:grid-cols-3">
+      <label>Kontokapital ({currency || "valuta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.01" step="any" value={capital} onChange={(event) => setCapital(event.target.value)} /></label>
+      <label>Max risk per trade (%)<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.01" max="100" step="any" value={riskPercent} onChange={(event) => setRiskPercent(event.target.value)} /></label>
+      <label>Uppskattade avgifter ({currency || "valuta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0" step="any" value={fees} onChange={(event) => setFees(event.target.value)} /></label>
+    </div>
+    {calculation.status === "CALCULATED" && <p role="status">Kalkyl: högst {calculation.max_shares} hela aktier · planerad risk {money(calculation.planned_risk)} · positionsvärde {money(calculation.position_value)}.</p>}
+    {calculation.status !== "CALCULATED" && <p className="text-xs text-slate-400">{calculation.reason}</p>}
+    <p className="text-xs text-amber-300">Kalkylatorn är inte ett godkännande, rekommendation eller validerad Risk Engine. Den modellerar inte spread, gap eller slippage.</p>
+  </Details>;
 }
 
 export default function App() {
@@ -73,8 +151,8 @@ export default function App() {
     invalidate();
     const version = revision.current;
     setImage(null);
-    if (!file.type.startsWith("image/") || file.size > 4 * 1024 * 1024) {
-      setNotice("Välj en bild mindre än 4 MB."); event.target.value = ""; return;
+    if (!ALLOWED_IMAGE_TYPES.has(file.type) || file.size > MAX_IMAGE_BYTES) {
+      setNotice("Välj en JPEG-, PNG-, WebP- eller GIF-bild på högst 3 MB."); event.target.value = ""; return;
     }
     const reader = new FileReader();
     reader.onload = () => {
@@ -116,7 +194,11 @@ export default function App() {
       if (version !== revision.current) return;
       const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
       const errors = responses.slice(0, 2).flatMap((response, index) => response.status === "rejected" ? [`${index === 0 ? "Marknadsdata" : "Nyheter"}: ${response.reason.message}`] : []);
-      const analysis = { ticker: currentTicker, horizon: horizonText, market, marketData: values[0], news: values[1], chart: values[2] };
+      const analysis = {
+        ticker: currentTicker, horizon: horizonText, market,
+        marketData: values[0], news: values[1], chart: values[2],
+        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[1]?.marketStatus }) : null,
+      };
       analysis.decision = evaluateReadiness({ ...analysis, errors });
       if (responses[2].status === "rejected") analysis.chartError = responses[2].reason.message;
       const snapshot = { ...analysis, version, record: createAnalysisRecord(analysis) };
@@ -126,6 +208,16 @@ export default function App() {
     } finally {
       if (version === revision.current) setBusy(false);
     }
+  }
+
+  async function saveRealTrade(record) {
+    await request("/api/trades", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) });
+    await refreshHistory();
+  }
+
+  async function closeRealTrade(update) {
+    await request("/api/trades", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(update) });
+    await refreshHistory();
   }
 
   return <main className="min-h-screen text-slate-200 p-4 md:p-8">
@@ -160,7 +252,7 @@ export default function App() {
         {market === "off" && <p className="text-xs text-amber-300">Marknadskontrollen är av för analysen. Detta ändrar inte datakällans börs och kringgår inte riskregler eller TRADE-spärren.</p>}
         {mode === "analysis" && <Details title="valfri graf">
           <p>Tickern måste vara korrekt. En uppladdad bild bevisar inte vilket instrument den visar.</p>
-          <input ref={fileInput} type="file" accept="image/*" disabled={!normalizeTicker(ticker) || busy} onChange={selectImage} />
+          <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={!normalizeTicker(ticker) || busy} onChange={selectImage} />
           {image && <><img src={image.preview} alt={`Graf som användaren kopplat till ${normalizeTicker(ticker)}`} className="max-h-64 w-full object-contain" /><button className={CONTROL} onClick={() => { invalidate(); setImage(null); fileInput.current.value = ""; }}>Ta bort graf</button></>}
           {image && <label className="block"><input type="checkbox" checked={image.confirmed} disabled={busy} onChange={(event) => { invalidate(); setImage({ ...image, confirmed: event.target.checked }); }} /> Jag bekräftar att grafen visar {normalizeTicker(ticker)}.</label>}
         </Details>}
@@ -174,9 +266,17 @@ export default function App() {
       {result && <section className="border border-cyan-900 rounded-lg p-4" aria-label="Samlad analys">
         <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className="text-cyan-300 font-bold">{LABELS[result.decision.status]}</span></div>
         <ul className="text-sm text-slate-300 mt-3 space-y-1 list-disc pl-5">{result.decision.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+        {result.strategy && <div className="border border-slate-800 rounded p-3 mt-3" aria-label="Experimentell swingbedömning">
+          <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className="text-cyan-300">{result.strategy.status === "WATCH" ? "BEVAKA" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
+          <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.join(" + ") : "ingen regel uppfylld"}</p>
+          <ul className="text-sm mt-2 list-disc pl-5">{result.strategy.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          {result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}
+          <p className="text-xs text-amber-300 mt-2">Bevakningen saknar marknadsindexfilter, relativ styrka och backtest. Nivåerna och positionskalkylen är provisoriska och godkänner aldrig en trade.</p>
+        </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
         <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
+        <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />
         <Details title="nyheter, graf och data">
           <h3 className="font-semibold">Nyhetsanalys</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || "Nyhetsanalys saknas."}</p>
           {result.news?.magnitude_note && <p>{result.news.magnitude_note}</p>}
@@ -195,11 +295,13 @@ export default function App() {
         <div className="mt-3 divide-y divide-slate-800">{history.slice(0, 5).map((trade) => {
           const analysis = trade.signal_inputs?.record_type === "ANALYSIS";
           const scan = trade.signal_inputs?.record_type === "SCAN";
+          const realTrade = trade.signal_inputs?.record_type === "REAL_TRADE";
           const decision = trade.signal_inputs?.decision;
           return <article key={trade.trade_id} className="py-3 text-sm">
-            <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? LABELS[decision?.status] || "NO TRADE" : `Äldre post · ${trade.signal}`}</span></div>
-            <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}` : analysis ? "Analysförslag" : trade.trade_status}</p>
-            {!analysis && trade.trade_status === "CLOSED" && Number.isFinite(trade.result_percent) && <p>Registrerat utfall: {trade.result_percent.toFixed(2)}%</p>}
+            <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? LABELS[decision?.status] || "NO TRADE" : realTrade ? `Faktisk trade · ${trade.direction}` : `Äldre post · ${trade.signal}`}</span></div>
+            <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}` : analysis ? "Analysförslag" : realTrade ? trade.trade_status : trade.trade_status}</p>
+            {realTrade && trade.trade_status === "CLOSED" && Number.isFinite(trade.result_percent) && <p>Nettoresultat: {trade.result_percent.toFixed(2)}%{Number.isFinite(trade.result_r) ? ` · ${trade.result_r.toFixed(2)}R` : ""} · {trade.winner === null ? "break-even" : trade.winner ? "vinst" : "förlust"}</p>}
+            {realTrade && trade.trade_status === "OPEN" && <CloseTradeForm trade={trade} onClose={closeRealTrade} />}
             <Details title="journalpost"><pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto">{JSON.stringify(trade, null, 2)}</pre></Details>
           </article>;
         })}</div>

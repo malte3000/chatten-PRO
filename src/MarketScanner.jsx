@@ -1,13 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { rankCandidates, SCREEN_VERSION } from "./screening.js";
+import { fetchJson } from "./apiClient.js";
 
 const LABELS = { WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
 
 async function api(url, body, signal) {
-  const response = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
-  const data = await response.json();
-  if (!response.ok) { const error = new Error(data.error || "Förfrågan misslyckades"); error.retryMs = data.retry_after_ms; error.status = response.status; throw error; }
-  return data;
+  return fetchJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
 }
 
 function pause(ms, signal) {

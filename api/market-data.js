@@ -1,5 +1,6 @@
 import { isAuthenticated } from "./_auth.js";
 import { validateMarketBars } from "./_market-data-validation.js";
+import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
 const ALLOWED_INTERVALS = new Set([
   "1min",
   "5min",
@@ -83,17 +84,16 @@ export default async function handler(req, res) {
     if (exchange) params.set("exchange", exchange);
 
     const response = await fetch(
-      `https://api.twelvedata.com/time_series?${params.toString()}`
+      `https://api.twelvedata.com/time_series?${params.toString()}`,
+      { signal: AbortSignal.timeout(15000) }
     );
 
-    const data = await response.json();
+    const data = await readProviderJson(response);
 
-    if (!response.ok || data?.status === "error") {
+    if (!response.ok || !data || data?.status === "error") {
       return res.status(502).json({
         error: "Market data provider error",
-        message:
-          data?.message ||
-          "Kunde inte hämta marknadsdata.",
+        message: providerErrorMessage(data, "Twelve Data returnerade ett ogiltigt svar."),
       });
     }
 
@@ -149,9 +149,9 @@ bars,
   } catch (error) {
     console.error("Market data error:", error);
 
-    return res.status(500).json({
-      error: "Kunde inte hämta marknadsdata",
-      message: error.message,
+    return res.status(isTimeoutError(error) ? 504 : 502).json({
+      error: isTimeoutError(error) ? "Tidsgränsen för marknadsdata överskreds." : "Kunde inte hämta marknadsdata",
+      message: isTimeoutError(error) ? "Twelve Data svarade inte inom 15 sekunder." : error.message,
     });
   }
 }

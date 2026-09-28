@@ -1,6 +1,8 @@
 node_modules/
 .pnpm-store/
 tests/preview-*.png
+/artifacts/access-check/
+/NIGHT_WORK_STATUS.md
 dist/
 .env
 .env.*

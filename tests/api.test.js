@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import newsHandler from "../api/analyze-news.js";
+import imageHandler from "../api/analyze-image.js";
+import marketDataHandler from "../api/market-data.js";
 import tradesHandler from "../api/trades.js";
-import { createAnalysisRecord } from "../src/analysisModel.js";
+import { createAnalysisRecord, createRealTradeRecord } from "../src/analysisModel.js";
 
 function response() {
   return { code: 200, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
@@ -11,7 +13,7 @@ function response() {
 
 function setup(t) {
   const oldFetch = globalThis.fetch;
-  const keys = ["APP_LOGIN_PASSWORD", "ANTHROPIC_API_KEY", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "VERCEL_ENV", "PREVIEW_ALLOW_WRITES"];
+  const keys = ["APP_LOGIN_PASSWORD", "ANTHROPIC_API_KEY", "TWELVE_DATA_API_KEY", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "VERCEL_ENV", "PREVIEW_ALLOW_WRITES"];
   const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   delete process.env.VERCEL_ENV;
   delete process.env.PREVIEW_ALLOW_WRITES;
@@ -29,6 +31,39 @@ function setup(t) {
 }
 
 const analysis = { direction: "upp", direction_confidence: 30, probability_up: 99, summary: "Kort nyhetsbild.", reasoning: "Fullständig text.", key_news: [] };
+const chartAnalysis = {
+  chart_type: "candlestick", price_detected: null, premarket_detected: false,
+  premarket_move_pct: null, premarket_notes: null, volatility_estimate: 35,
+  drift_estimate: 0, trend: "neutral", confidence: 50, reasoning: "Försiktig grafbedömning.",
+  candlestick_pattern: null, candlestick_reasoning: null, amd_phase: "unclear",
+  amd_confidence: null, amd_reasoning: "Otydlig fas.", commentary: "",
+};
+const imageInput = { ticker: "NVDA", market: "stockholm", imageBase64: "eA==", imageMediaType: "image/png" };
+
+test("Anthropic routes report a missing server key before calling the provider", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T09:00:00Z") });
+  const headers = setup(t);
+  delete process.env.ANTHROPIC_API_KEY;
+  globalThis.fetch = async () => { throw new Error("provider must not be called"); };
+  const news = response();
+  await newsHandler({ method: "POST", headers, body: { ticker: "NVDA" } }, news);
+  assert.equal(news.code, 500);
+  assert.match(news.data.error, /ANTHROPIC_API_KEY/);
+  const image = response();
+  await imageHandler({ method: "POST", headers, body: { ticker: "NVDA", imageBase64: "eA==", imageMediaType: "image/png", market: "stockholm" } }, image);
+  assert.equal(image.code, 500);
+  assert.match(image.data.error, /ANTHROPIC_API_KEY/);
+});
+
+test("market data translates a provider timeout into a clear gateway timeout", async (t) => {
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  globalThis.fetch = async () => { throw new DOMException("Timed out", "TimeoutError"); };
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "NVDA", interval: "1day" } }, res);
+  assert.equal(res.code, 504);
+  assert.match(res.data.message, /15 sekunder/);
+});
 
 test("news runs for a closed market and never treats AI confidence as probability", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-19T12:00:00Z") });
@@ -61,6 +96,80 @@ test("paused, truncated, or invalid news is rejected", async (t) => {
   }
 });
 
+test("HTTP success with a web search tool error cannot confirm fresh news", async (t) => {
+  const headers = setup(t);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({
+    stop_reason: "end_turn", content: [
+      { type: "web_search_tool_result", content: { type: "web_search_tool_result_error", error_code: "unavailable" } },
+      { type: "text", text: JSON.stringify(analysis) },
+    ],
+  }) });
+  const res = response();
+  await newsHandler({ method: "POST", headers, body: { ticker: "NVDA" } }, res);
+  assert.equal(res.code, 502);
+  assert.match(res.data.error, /Nyhetssökningen misslyckades/);
+  assert.equal(res.data.direction, undefined);
+});
+
+test("provider body-read timeouts retain the explicit gateway timeout", async (t) => {
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  globalThis.fetch = async () => ({ ok: true, json: async () => { throw new DOMException("Body timed out", "TimeoutError"); } });
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "NVDA", interval: "1day" } }, res);
+  assert.equal(res.code, 504);
+});
+
+test("unsupported, malformed, and oversized image inputs never reach Anthropic", async (t) => {
+  const headers = setup(t);
+  globalThis.fetch = async () => { throw new Error("invalid image must not reach provider"); };
+  for (const [patch, expectedStatus] of [
+    [{ imageMediaType: "image/svg+xml" }, 400],
+    [{ imageBase64: "not base64" }, 400],
+    [{ imageBase64: {} }, 400],
+    [{ ticker: {} }, 400],
+    [{ imageBase64: Buffer.alloc(3 * 1024 * 1024 + 1).toString("base64") }, 413],
+  ]) {
+    const res = response();
+    await imageHandler({ method: "POST", headers, body: { ...imageInput, ...patch } }, res);
+    assert.equal(res.code, expectedStatus);
+  }
+});
+
+test("complete chart analysis validates its shape and returns ticker context", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T09:00:00Z") });
+  const headers = setup(t);
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    assert.equal(request.messages[0].content[0].source.media_type, "image/png");
+    return { ok: true, json: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(chartAnalysis) }] }) };
+  };
+  const res = response();
+  // A 3 MiB binary image expands to 4 MiB base64 and stays below Vercel's 4.5 MB payload cap.
+  await imageHandler({ method: "POST", headers, body: { ...imageInput, ticker: " nvda ", imageBase64: Buffer.alloc(3 * 1024 * 1024).toString("base64") } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.data.ticker, "NVDA");
+  assert.equal(res.data.confidence, 50);
+});
+
+test("paused, truncated, or invalid chart analysis cannot produce accepted output", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T09:00:00Z") });
+  const headers = setup(t);
+  for (const [stopReason, value] of [
+    ["pause_turn", chartAnalysis], ["max_tokens", chartAnalysis],
+    ["end_turn", { confidence: 50 }],
+    ["end_turn", { ...chartAnalysis, confidence: 999 }],
+    ["end_turn", { ...chartAnalysis, price_detected: -1 }],
+    ["end_turn", { ...chartAnalysis, amd_phase: "unknown" }],
+  ]) {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ stop_reason: stopReason, content: [{ type: "text", text: JSON.stringify(value) }] }) });
+    const res = response();
+    await imageHandler({ method: "POST", headers, body: imageInput }, res);
+    assert.equal(res.code, 502);
+    assert.equal(res.data.confidence, undefined);
+  }
+});
+
 test("trade save and journal read roundtrip through mocked Supabase", async (t) => {
   const headers = setup(t);
   const record = createAnalysisRecord({ ticker: "NVDA", decision: { status: "WAIT", reasons: ["Risk pending"] } }, { id: "fixed" });
@@ -79,6 +188,72 @@ test("trade save and journal read roundtrip through mocked Supabase", async (t) 
   assert.equal(read.code, 200);
   assert.equal(read.data.trades[0].signal_inputs.decision.status, "WAIT");
   assert.equal(read.data.trades[0].winner, null);
+});
+
+test("new Supabase secret keys use apikey without an invalid JWT bearer header", async (t) => {
+  const headers = setup(t);
+  process.env.SUPABASE_SECRET_KEY = "sb_secret_test_only";
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.headers.apikey, "sb_secret_test_only");
+    assert.equal(options.headers.Authorization, undefined);
+    return { ok: true, json: async () => [] };
+  };
+  const res = response();
+  await tradesHandler({ method: "GET", headers }, res);
+  assert.equal(res.code, 200);
+});
+
+test("real trade closes with direction-aware net percentage and R after fees", async (t) => {
+  const headers = setup(t);
+  const record = createRealTradeRecord({
+    analysis: { ticker: "NVDA", horizon: "1–5 handelsdagar", market: "usa", record: { trade_id: "NVDA-analysis", strategy_version: "v-test" } },
+    direction: "LONG", entryPrice: "100", stopLoss: "95", target: "110", positionSize: "2", fees: "1",
+  }, { now: new Date("2026-09-20T12:00:00Z"), id: "actual" });
+  assert.equal(record.trade_status, "OPEN");
+  assert.equal(record.signal_inputs.record_type, "REAL_TRADE");
+  let stored = record;
+  globalThis.fetch = async (url, options = {}) => {
+    assert.ok(url.startsWith("https://example.invalid/rest/v1/trades?"));
+    if (options.method === "PATCH") {
+      Object.assign(stored, JSON.parse(options.body));
+      return { ok: true, json: async () => [stored] };
+    }
+    return { ok: true, json: async () => [stored] };
+  };
+  const res = response();
+  await tradesHandler({ method: "PATCH", headers, body: { trade_id: record.trade_id, exit_price: 110, fees: 1, exit_reason: "TARGET" } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.data.trade.result_percent, 9);
+  assert.equal(res.data.trade.result_r, 1.8);
+  assert.equal(res.data.trade.winner, true);
+  assert.equal(res.data.trade.signal_inputs.total_actual_fees, 2);
+
+  const shortRecord = createRealTradeRecord({
+    analysis: { ticker: "NVDA", record: { trade_id: "NVDA-analysis" } },
+    direction: "SHORT", entryPrice: 50, stopLoss: 55, target: 40, positionSize: 3,
+  }, { id: "short" });
+  stored = shortRecord;
+  const shortClose = response();
+  await tradesHandler({ method: "PATCH", headers, body: { trade_id: shortRecord.trade_id, exit_price: 40, fees: 0, exit_reason: "TARGET" } }, shortClose);
+  assert.equal(shortClose.data.trade.result_percent, 20);
+  assert.equal(shortClose.data.trade.result_r, 2);
+
+  const flatRecord = createRealTradeRecord({
+    analysis: { ticker: "NVDA" }, direction: "LONG", entryPrice: 100,
+    stopLoss: 95, target: 110, positionSize: 2, fees: 1,
+  }, { id: "flat" });
+  stored = flatRecord;
+  const flatClose = response();
+  await tradesHandler({ method: "PATCH", headers, body: { trade_id: flatRecord.trade_id, exit_price: 101, fees: 1, exit_reason: "MANUAL" } }, flatClose);
+  assert.equal(flatClose.data.trade.result_percent, 0);
+  assert.equal(flatClose.data.trade.winner, null);
+});
+
+test("real trade record validates side, prices and size", () => {
+  const analysisInput = { analysis: { ticker: "NVDA" }, direction: "LONG", entryPrice: 100, stopLoss: 95, target: 110, positionSize: 2 };
+  assert.throws(() => createRealTradeRecord({ ...analysisInput, direction: "BUY" }), /lång eller kort/);
+  assert.throws(() => createRealTradeRecord({ ...analysisInput, stopLoss: 101 }), /risksidan/);
+  assert.throws(() => createRealTradeRecord({ ...analysisInput, positionSize: null }), /positionsstorlek/);
 });
 
 test("unauthenticated requests never reach Supabase", async (t) => {
@@ -116,4 +291,13 @@ test("Supabase failure is not reported as saved", async (t) => {
   await tradesHandler({ method: "GET", headers }, res);
   assert.equal(res.code, 503);
   assert.notEqual(res.data.success, true);
+});
+
+test("journal timeout returns an explicit gateway timeout", async (t) => {
+  const headers = setup(t);
+  globalThis.fetch = async () => { throw new DOMException("Timed out", "TimeoutError"); };
+  const res = response();
+  await tradesHandler({ method: "GET", headers }, res);
+  assert.equal(res.code, 504);
+  assert.match(res.data.message, /12 sekunder/);
 });

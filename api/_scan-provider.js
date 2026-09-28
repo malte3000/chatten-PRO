@@ -1,5 +1,6 @@
 import { validateMarketBars } from "./_market-data-validation.js";
 import { screenInstrument, rankCandidates } from "../src/screening.js";
+import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
 
 const universeCache = new Map();
 const MAX_RUN = 100;
@@ -11,10 +12,10 @@ export class ScanError extends Error {
 async function provider(url) {
   let response;
   try { response = await fetch(url, { signal: AbortSignal.timeout(12000) }); }
-  catch { throw new ScanError("Marknadsdatakällan svarade inte i tid."); }
-  const data = await response.json();
+  catch (error) { throw new ScanError(isTimeoutError(error) ? "Tidsgränsen för marknadsdata överskreds." : "Marknadsdatakällan svarade inte.", isTimeoutError(error) ? 504 : 502); }
+  const data = await readProviderJson(response);
   if (response.status === 429 || Number(data?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Försök igen senare.", 429, 61000);
-  if (!response.ok || data?.status === "error") throw new ScanError("Datakällan kunde inte leverera data. Kontrollera täckning och abonnemang.");
+  if (!response.ok || !data || data?.status === "error") throw new ScanError(providerErrorMessage(data, "Datakällan returnerade ett ogiltigt svar. Kontrollera täckning och abonnemang."));
   return data;
 }
 
