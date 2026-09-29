@@ -1,26 +1,41 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
 
 export const STRATEGY_VERSION = "v0.2-readiness";
+export const READINESS_VERSION = "readiness-v0.3";
 export const normalizeTicker = (value) => String(value || "").trim().toUpperCase();
+const readinessDecision = (status, reasons, reason_codes) => ({ version: READINESS_VERSION, status, reasons, reason_codes });
 
-// Readiness only. AI confidence cannot approve a trade. TRADE remains disabled
-// until a tested signal engine and risk engine are implemented.
-export function evaluateReadiness({ ticker, marketData, news, errors = [] }) {
+// Readiness only. AI confidence and experimental setups cannot approve a trade.
+export function evaluateReadiness({ ticker, marketData, news, strategy, errors = [] }) {
   const reasons = [...errors];
+  const reason_codes = errors.length ? ["UPSTREAM_ERROR"] : [];
   const matches = normalizeTicker(marketData?.ticker) === normalizeTicker(ticker) &&
     (!marketData?.requested_ticker || normalizeTicker(marketData.requested_ticker) === normalizeTicker(ticker));
   if (!marketData || !matches || !marketData.validation?.valid || !validateMarketBars(marketData.bars).valid) {
     reasons.push("Validerad marknadsdata för aktuell ticker saknas.");
+    reason_codes.push("MARKET_DATA_INVALID");
   }
-  if (!Number.isFinite(marketData?.price) || marketData.price <= 0) reasons.push("Giltigt aktuellt pris saknas.");
-  if (!news || normalizeTicker(news.ticker) !== normalizeTicker(ticker)) reasons.push("Nyhetsanalys för aktuell ticker saknas.");
-  if (news && !["upp", "ner", "oklart"].includes(news.direction)) reasons.push("Nyhetsriktningen är ogiltig.");
-  if (reasons.length) return { status: "NO_TRADE", reasons };
-  if (news.direction === "ner") return { status: "NO_TRADE", reasons: ["Nyhetsläget talar mot en lång position."] };
-  return { status: "WAIT", reasons: [
+  if (!Number.isFinite(marketData?.price) || marketData.price <= 0) {
+    reasons.push("Giltigt aktuellt pris saknas.");
+    reason_codes.push("PRICE_INVALID");
+  }
+  if (!news || normalizeTicker(news.ticker) !== normalizeTicker(ticker)) {
+    reasons.push("Nyhetsanalys för aktuell ticker saknas.");
+    reason_codes.push("NEWS_MISSING_OR_MISMATCHED");
+  }
+  if (news && !["upp", "ner", "oklart"].includes(news.direction)) {
+    reasons.push("Nyhetsriktningen är ogiltig.");
+    reason_codes.push("NEWS_DIRECTION_INVALID");
+  }
+  if (reasons.length) return readinessDecision("NO_TRADE", reasons, reason_codes);
+  if (news.direction === "ner") return readinessDecision("NO_TRADE", ["Nyhetsläget talar mot en lång position."], ["NEWS_BEARISH"]);
+  if (strategy?.status === "NO_SETUP") return readinessDecision("NO_TRADE", ["Inget experimentellt swingupplägg uppfyllde reglerna på senaste stängda dagsljuset."], ["SWING_NO_SETUP"]);
+  if (strategy?.status === "NOT_ASSESSED") return readinessDecision("NO_TRADE", ["Swingupplägget kunde inte bedömas med tillgängliga färdigställda dagsljus."], ["SWING_NOT_ASSESSED"]);
+  if (strategy && strategy.status !== "WATCH") return readinessDecision("NO_TRADE", ["Strategibedömningen har en ogiltig status."], ["STRATEGY_STATUS_INVALID"]);
+  return readinessDecision("WAIT", [
     news.direction === "upp" ? "Nyhetsläget kan motivera fortsatt analys, inte en trade." : "Nyhetsläget ger ingen tydlig riktning.",
-    "Teknisk signalmotor, riskplan och strategivalidering saknas. TRADE är spärrat.",
-  ] };
+    "Validerad signalmotor, riskmotor och utvärderad edge saknas. TRADE är spärrat.",
+  ], [news.direction === "upp" ? "NEWS_SUPPORTIVE" : "NEWS_UNCLEAR", strategy ? "SWING_WATCH_UNVALIDATED" : "NO_VALIDATED_STRATEGY"]);
 }
 
 export function createAnalysisRecord({ ticker, horizon, market, marketData, news, chart, decision, strategy }, { now = new Date(), id = globalThis.crypto.randomUUID() } = {}) {

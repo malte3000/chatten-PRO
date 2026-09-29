@@ -6,6 +6,7 @@ import { calculatePositionSize } from "./riskModel.js";
 import MarketScanner from "./MarketScanner.jsx";
 import PerformanceSummary from "./PerformanceSummary.jsx";
 import HistoricalReplay from "./HistoricalReplay.jsx";
+import PaperJournal from "./PaperJournal.jsx";
 
 const LABELS = { TRADE: "TRADE", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
@@ -310,6 +311,7 @@ export default function App() {
           </article>;
         })}</div>
       </section>
+      <PaperJournal latestAnalysis={result} />
       <footer className="text-xs text-slate-500">Prototyp, inte en validerad handelsstrategi. Risk Engine, personlig tradeuppföljning och produktdata för derivat återstår. Ingen träffsäkerhet utlovas.</footer>
     </div>
   </main>;

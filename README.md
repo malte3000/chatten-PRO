@@ -12,11 +12,19 @@ Marknad kan väljas som USA, Sverige/Stockholm eller Av (endast analys).
 Av påverkar öppettidskontrollen, inte datakällans börs eller TRADE-spärren.
 
 Besluten är TRADE, AVVAKTA och NO TRADE. **TRADE är spärrat i denna etapp**:
-teknisk signalmotor, riskplan och strategivalidering är inte implementerade.
-Giltiga inputs kan ge AVVAKTA; saknade/ogiltiga inputs ger NO TRADE.
+validerad signalmotor, godkänd Risk Engine och utvärderad edge saknas.
+Giltiga inputs med en experimentell swingkandidat kan ge AVVAKTA;
+saknade/ogiltiga inputs och frånvaro av swingupplägg ger NO TRADE.
 AI-confidence används aldrig som uppgångssannolikhet. Ingen träffsäkerhet är
 uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
+
+Från `readiness-v0.3` påverkar den experimentella swingregeln även det
+övergripande beslutet: `NO_SETUP` och `NOT_ASSESSED` ger NO TRADE med skilda
+orsakskoder. Ett giltigt `WATCH` kan högst ge AVVAKTA. Beslutets version och
+orsakskoder sparas i analyssnapshoten så att gamla och nya AVVAKTA-poster inte
+blandas som om samma urvalsregel gällde. Daytrade utan swingregel behåller
+AVVAKTA när övriga data är giltiga; någon validerad daytrade-signal finns inte.
 
 Manuell aktieanalys i swingläge visar nu även en experimentell pullback-/breakout-
 bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP och använder
@@ -159,6 +167,25 @@ splittar/utdelningar, överlevnadsbias, spread, likviditet och verkliga fills
 måste utredas i ett bredare prov. Backtestmotorn gör ingen sådan kontroll och
 bekräftar inte en edge. Out-of-sample, paper trading och validerad Risk Engine
 krävs fortfarande före TRADE.
+
+## Paperlogg för framtida utfall (experimentell)
+
+En BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal paperobservation.
+Signalens datum, strategi, prisnivåer och uttryckliga antaganden om antal,
+avgifter, slippage och max innehavstid låses innan senare dagskurser finns.
+När samma aktie analyseras på nytt kontrolleras nya färdigställda dagskurser
+mot den låsta observationen. Kontroll görs bara vid användarens vanliga analys;
+paperloggen startar inga egna API-anrop, bakgrundsjobb eller order. Utfallet
+kan vara väntande, simulerat avslutat, avvisad ingång eller ej bedömbart.
+Vinst/förlust och netto räknas bara för avslutade simuleringar. NO TRADE är ett
+avstående och räknas aldrig som en lyckad trade.
+
+Paperloggen lagras i den aktuella webbläsaren på **previewns branch-adress**.
+Den finns inte i Supabase och synkas inte automatiskt mellan datorer eller
+olika previewdomäner. JSON-export ger en kopia som kan importeras på en annan
+dator. Olika poster med samma ID skrivs inte över vid import. Det är en
+experimentell, lokalt redigerbar logg, ingen verifierad revisionskedja eller
+grund för att låsa upp TRADE.
 
 **Inloggningen använder ett gemensamt lösenord; journalen är gemensam.**
 Personlig historik kräver riktig användaridentitet, databasägarskap och

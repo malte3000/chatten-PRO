@@ -22,7 +22,11 @@ dagsljus. Provisorisk ATR-stop, 2R-målnivå och aktieantal från användarens e
 kapital/riskprocent visas som kalkyl. Ett lokalt historiskt prisprov och ett
 referensfilter med relativ styrka finns som experiment. Referensfiltret används
 bara i prov med explicit referensdata, ännu inte i den vanliga analysen.
-Historisk validering saknas; kalkylen kan inte godkänna TRADE. Journalstatistik
+Historisk validering saknas; kalkylen kan inte godkänna TRADE. Från readiness-v0.3
+ger swingreglernas NO_SETUP/NOT_ASSESSED NO TRADE och endast WATCH kan ge AVVAKTA.
+En separat lokal paperlogg kan låsa en BEVAKA-kandidat och pröva den mot senare
+färdigställda dagskurser. Loggen är webbläsarbunden, inte en verklig trade eller
+godkänd order och inte synkad via databasen. Journalstatistik
 räknar giltiga avslutade faktiska affärer separat från förslag och simuleringar,
 per strategiversion och valuta. Omfattningen är de senaste 100 hämtade posterna.
 Screeningens första experimentella version är nu implementerad för ett
