@@ -2,16 +2,21 @@
 
 ## Projekt: Sannolikhetsterminal / Signal Bot
 
-### Godkänd inriktning 2026-09-16 (ersätter äldre UI/signalexempel nedan)
+### Aktuell inriktning (grundbeslut 2026-09-16, kompletterad 2026-09-30)
 
 - Swingtrading (1–5 handelsdagar) är huvudläge; daytrading är sekundärt.
-- Endast TRADE, AVVAKTA eller NO TRADE visas som slutbeslut.
+- Färdig terminal ska ha TRADE eller NO TRADE som slutbeslut. AVVAKTA/BEVAKA
+  är ett temporärt testläge för paperobservationer medan TRADE är spärrat.
 - Samlad kort analys med Start och Se mer, inte separata analysverktyg.
 - AI-confidence får inte användas som uppgångs-/vinstsannolikhet.
 - TRADE kräver validerad signalmotor och godkänd separat Risk Engine.
 - 65–75 procent träffsäkerhet är ett testmål, inte ett påstående om resultat.
 - Förslag och faktiska trades ska hållas isär i personlig journal.
 - Ingen automatisk orderläggning eller självlärande strategiändring.
+- Framtida marknadsval: utred Europa i stället för enbart Sverige/Stockholm.
+  Europa måste då byggas per börs med rätt instrument, valuta, tidszon,
+  öppettider, helgdagar och verifierad datatäckning. Behåll Stockholm som
+  faktiskt stödd marknad tills dessa delar fungerar och är testade.
 
 Första etappen implementerar kompakt analys och befintlig gemensam journal.
 Personlig identitet och validerad quant/risk återstår. Manuell registrering av
