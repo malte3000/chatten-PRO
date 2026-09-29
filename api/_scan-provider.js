@@ -73,7 +73,8 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
       ...screenInstrument(instrument, marketData, { horizon, now }),
       data_snapshot: {
         source: "twelve_data", interval: horizon === "week" ? "1day" : "15min",
-        timestamp_timezone: "UTC", fetched_at: new Date(now).toISOString(),
+        timestamp_timezone: horizon === "week" ? raw.meta?.exchange_timezone || null : "UTC", fetched_at: new Date(now).toISOString(),
+        timestamp_kind: horizon === "week" ? "exchange_session_date" : "utc_instant",
         validation: marketData.validation, bars,
       },
     };

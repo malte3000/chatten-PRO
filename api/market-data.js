@@ -138,6 +138,8 @@ if (!validation.valid) {
       exchange: data.meta?.exchange || null,
       currency: data.meta?.currency || null,
       timezone: data.meta?.exchange_timezone || null,
+      timestamp_timezone: interval === "1day" ? data.meta?.exchange_timezone || null : "UTC",
+      timestamp_kind: interval === "1day" ? "exchange_session_date" : "utc_instant",
       fetched_at: new Date().toISOString(),
 validation,
 

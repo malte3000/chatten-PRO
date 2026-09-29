@@ -8,10 +8,17 @@ function createMockApi() {
     const lastDate = new Date();
     lastDate.setUTCHours(0, 0, 0, 0);
     lastDate.setUTCDate(lastDate.getUTCDate() - 1);
-    const bars = Array.from({ length: 100 }, (_, index) => {
+    const dates = [];
+    let date = lastDate;
+    while (dates.length < 100) {
+      if (![0, 6].includes(date.getUTCDay())) dates.unshift(date.toISOString().slice(0, 10));
+      date = new Date(date.getTime() - 86400000);
+    }
+    const bars = dates.map((datetime, index) => {
       const close = 50 + index;
-      return { datetime: new Date(lastDate.getTime() - (99 - index) * 86400000).toISOString().slice(0, 10), open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: 1000000 };
+      return { datetime, open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: 1000000 };
     });
+    bars[79].low = 119.8;
     bars[99].low = 139.8;
     return bars;
   }
@@ -29,7 +36,7 @@ function createMockApi() {
       const bars = dailyBars();
       return { status: 200, body: {
         ticker, requested_ticker: ticker, exchange: searchParams.get("exchange") || "NASDAQ", currency: "USD",
-        interval: searchParams.get("interval") || "1day", fetched_at: new Date().toISOString(),
+        interval: searchParams.get("interval") || "1day", timezone: "America/New_York", fetched_at: new Date().toISOString(),
         validation: { valid: true }, bars, latest: bars.at(-1), price: bars.at(-1).close,
       } };
     }
@@ -130,6 +137,16 @@ async function runSmoke() {
     await newsDetails.click();
     assert.equal(await result.getByText("Fullständig motivering som visas under Se mer.", { exact: true }).isVisible(), true);
     await newsDetails.click();
+    const replay = result.locator("details").filter({ hasText: "Se mer – historiskt prisprov" });
+    await replay.locator("summary").first().click();
+    await replay.getByLabel("Fast antal simulerade aktier").fill("2");
+    await replay.getByLabel("Avgift per order (USD)").fill("1");
+    await replay.getByLabel("Slippage (baspunkter, 10 = 0,1 %)").fill("10");
+    const savedBeforeReplay = saved.length;
+    await replay.getByRole("button", { name: "Kör prisprov på hämtad data", exact: true }).click();
+    await replay.getByText(/1 stängda simuleringar/).waitFor();
+    assert.equal(saved.length, savedBeforeReplay);
+    await replay.locator("summary").first().click();
     const risk = result.locator("details").filter({ hasText: "Se mer – pullback · provisorisk riskplan" });
     await risk.locator("summary").click();
     await risk.getByLabel("Kontokapital (USD)").fill("10000");
@@ -166,6 +183,9 @@ async function runSmoke() {
     assert.equal(saved[0].trade_status, "CLOSED");
     assert.equal(saved[0].result_percent, 9);
     assert.equal(saved[0].result_r, 1.8);
+    await journal.getByText("Utfall i hämtad journal", { exact: true }).click();
+    await journal.getByText("Avslutade faktiska trades med giltigt utfall: 1.", { exact: true }).waitFor();
+    assert.equal(await journal.getByText("1,80 R", { exact: true }).isVisible(), true);
 
     await ticker.fill("AMD");
     assert.equal(await page.getByRole("region", { name: "Samlad analys" }).count(), 0);

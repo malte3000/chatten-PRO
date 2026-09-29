@@ -116,6 +116,6 @@ export function getMarketStatus(marketId = "stockholm", now = new Date()) {
   const reason = weekend ? "weekend" : holiday ? "holiday" : minutes < market.open ? "before_open" : minutes >= close ? "after_close" : "open";
   const time = (value) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 
-  return { market: id, label: market.label, isOpen, reason, localTime: `${parts.hour}:${parts.minute}`, hours: `${time(market.open)}–${time(close)}`, earlyClose };
+  return { market: id, label: market.label, isOpen, reason, sessionDate: day, timeZone: market.timeZone, localTime: `${parts.hour}:${parts.minute}`, hours: `${time(market.open)}–${time(close)}`, earlyClose };
 }
 

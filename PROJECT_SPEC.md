@@ -19,8 +19,12 @@ verkliga aktieaffärer och stängning med resultat efter avgifter finns nu i den
 gemensamma journalen; det är användarens affär, inte ett botgodkänt beslut.
 Swinganalys visar experimentella pullback-/breakout-bevakningsregler på stängda
 dagsljus. Provisorisk ATR-stop, 2R-målnivå och aktieantal från användarens eget
-kapital/riskprocent visas som kalkyl. Marknadsindexfilter, relativ styrka och
-historisk validering saknas; kalkylen kan inte godkänna TRADE.
+kapital/riskprocent visas som kalkyl. Ett lokalt historiskt prisprov och ett
+referensfilter med relativ styrka finns som experiment. Referensfiltret används
+bara i prov med explicit referensdata, ännu inte i den vanliga analysen.
+Historisk validering saknas; kalkylen kan inte godkänna TRADE. Journalstatistik
+räknar giltiga avslutade faktiska affärer separat från förslag och simuleringar,
+per strategiversion och valuta. Omfattningen är de senaste 100 hämtade posterna.
 Screeningens första experimentella version är nu implementerad för ett
 budgetbegränsat, dagligt varierat aktieurval. EMA20/50, ATR, momentum och RVOL
 gallrar kandidater utan TRADE-godkännande. Nyheter hämtas för högst tre

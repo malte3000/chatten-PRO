@@ -19,11 +19,17 @@ uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
 
 Manuell aktieanalys i swingläge visar nu även en experimentell pullback-/breakout-
-bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP, saknar än så
-läge marknadsindexfilter, relativ styrka och historisk validering. En WATCH kan
+bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP och använder
+ännu inget referensfilter i den vanliga analysen. Reglerna är inte historiskt
+validerade. En WATCH kan
 visa provisorisk ATR-stop, 2R-målnivå och en kalkyl av högsta hela aktieantalet
 från användarens eget kapital och riskprocent. Detta är inte en validerad
 Risk Engine och kan inte godkänna TRADE.
+
+`swing-v0.2-experimental` kontrollerar börsens tidszon och verkliga sessionsdatum.
+Dagens ofärdiga dagsljus tas bort; gårdagens behålls även om börsen är öppen.
+Alla använda dagsljus kräver positiv volym. Färskhetsgränsen är fem kalenderdagar,
+inte en fullständig kontroll av saknade handelssessioner.
 
 Nyhetsanalys körs även utanför öppettider. Ofullständiga (`pause_turn`,
 `max_tokens`) och felaktigt formaterade svar nekas säkert. Strukturerad
@@ -46,7 +52,7 @@ Urvalet är deterministiskt för UTC-datum och varierar dagligen; det är INTE
 hela börsen eller de bevisat bästa aktierna. Antal kontrollerade, lista och
 bortgallringar visas. Av kräver att användaren väljer marknad för skanning.
 
-Skannern hämtar 100 UTC-candles per aktie och kräver minst 60 giltiga candles,
+Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
 Försöksfilter: pris > EMA20 > EMA50, positivt fem-candle-momentum, RVOL >= 1,
 ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
@@ -73,8 +79,10 @@ automation. Browser måste vara öppen; Stoppa bevarar en ofullständig rapport.
 En rapport sparas via befintlig `/api/trades` med `record_type=SCAN` i
 `signal_inputs`, syntetisk ticker SCAN-USA/SCAN-SE och inga tradeutfall.
 Journal/statistik måste skilja SCAN, ANALYSIS och faktiska trades.
-Returnerad OHLCV sparas i rapportens data_snapshot tillsammans med UTC-tidszon,
+Returnerad OHLCV sparas i rapportens data_snapshot tillsammans med tidszon,
 intervall och hämttid för att testerna ska kunna reproduceras utan framtida data.
+Dagskurser är börsens lokala sessionsdatum; intradagskurser begärs i UTC.
+Detta följer [Twelve Datas tidszonsregler för time_series](https://twelvedata.com/docs).
 Publik OMX/XSTO-listning är kontrollerad, men abonnemangets pris-/volymtäckning,
 livekvot och live-Supabase är inte verifierade. Tester använder simulerade svar.
 
@@ -98,6 +106,59 @@ med riktning, faktiskt ingångspris, antal, valfri stop/målnivå och ingångsav
 och avslutsorsak. Servern beräknar nettoresultat i procent och, om stop finns,
 R-resultat. Posten märks `record_type=REAL_TRADE` och länkas till analysen.
 Detta är journalföring av användarens affär; terminalens analys godkänner den inte.
+
+**Utfall i hämtad journal** räknar bara giltiga avslutade REAL_TRADE, grupperade
+per strategiversion och valuta. Priser, storlek, faktiska avgifter och sparat
+netto kontrolleras mot varandra; felaktiga och dubbla poster utesluts med orsaker.
+Medel-R använder bara trades med giltig ursprunglig stop och R. Om inga förluster
+finns är profit factor inte beräknad. Underlaget är högst de 100 senast hämtade
+posterna, inte hela livstidshistoriken. Netto / summerat ingångsvärde är inte
+kontots avkastning, och vinstandelen är inte en prognos.
+
+## Historiskt prisprov (experimentellt)
+
+Swinganalysens **Se mer – historiskt prisprov** kör pullback eller breakout
+lokalt på redan hämtade dagskurser. Ange fast antal aktier, avgift per order
+och slippage uttryckligen. Provet gör inga API-anrop eller journalskrivningar.
+Upp till 100 dagsljus, varav de första 60 används för indikatorer, är ett kort
+urval och kan ge få eller inga simuleringar. Historiska nyheter och AI ingår inte.
+
+`daily-replay-v0.1-experimental` fattar beslut med endast då tillgängliga
+stängningsdata. Ingång sker tidigast vid nästa observerade öppning, försämrad
+av slippage. Ursprunglig stop behålls; mål och R räknas om från simulerad ingång.
+Öppning utanför signalens nivåer avvisas. Stop-gap fylls vid sämre öppningspris.
+Om både stop och mål träffas samma dagsljus används stop först. Vid målgap
+antas inget bättre pris än målet, och slippage dras även från målutgången.
+Innehavstiden är 1–5 observerade dagsljus med en position åt gången. Båda
+orderavgifterna dras. Öppna slutpositioner ingår inte i utfallsstatistiken.
+Drawdown gäller realiserade resultat; inget kontokapital eller marknadsvärde
+simuleras. Nästa öppning är en separat exekveringstid från beslutet vid
+stängning, enligt den vanliga [barbaserade exekveringsmodellen](https://www.backtrader.com/docu/quickstart/quickstart/).
+
+För större sparade underlag finns ett offline-CLI, högst 5 000 stängda dagsljus:
+
+```sh
+npm run backtest -- --input data.json --output rapport.json --market usa --setup BREAKOUT --holding 3 --quantity 2 --fee 1 --slippage-bps 10 --as-of 2026-09-28T22:00:00Z
+```
+
+Input har samma JSON-format som `/api/market-data`: ticker, currency, exchange,
+timezone, interval `1day` och stigande unika bars med datum, OHLC och volume.
+Använd en ny rapportfil; CLI skriver aldrig över en befintlig. `--help` beskriver
+alla parametrar. Kostnaderna i exemplet är antaganden, inte en rekommendation.
+
+Lägg till `--benchmark referens.json --benchmark-ticker SPY` bara när filen
+faktiskt är dagsdata för det uttryckligen valda referensinstrumentet. Då krävs
+`market-context-v0.1-experimental`: positiv benchmarktrend (pris över EMA20
+över EMA50 och positivt femsessionsmomentum) samt aktiens högre prisavkastning
+över samma 20 sessioner. Börs, valuta, tidszon och senaste 21 datum måste matcha.
+Saknade data ger NOT_ASSESSED och negativa filter BLOCKED; bara CONFIRMED
+släpper igenom signalen i detta prov. Ingen extra referensdata hämtas automatiskt.
+
+Detta är ett prisexperiment för LONG-regler. Saknade sessioner, justering för
+splittar/utdelningar, överlevnadsbias, spread, likviditet och verkliga fills
+måste utredas i ett bredare prov. Backtestmotorn gör ingen sådan kontroll och
+bekräftar inte en edge. Out-of-sample, paper trading och validerad Risk Engine
+krävs fortfarande före TRADE.
 
 **Inloggningen använder ett gemensamt lösenord; journalen är gemensam.**
 Personlig historik kräver riktig användaridentitet, databasägarskap och
@@ -143,7 +204,7 @@ förbrukar API-krediter; ingen livekörning ingår i de automatiska testerna.
 
 1. Användaridentitet och personlig journal.
 2. Separat Risk Engine med konfigurerbara riskgränser.
-3. Backtest, out-of-sample och paper trading före TRADE-aktivering.
-4. Relativ styrka/marknadsfilter för strategin samt utökad screening och
+3. Historiskt prov på kontrollerade marknadsdata, out-of-sample och paper trading före TRADE-aktivering.
+4. Koppla och utvärdera referensfiltret i vanlig analys samt utökad screening och
    distribuerade kvotjobb. Derivat kräver separat produktspecifik data och
    riskanalys.

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "backtest": "node scripts/backtest.js",
     "dev": "vite",
     "build": "vite build --configLoader runner",
     "preview": "vite preview"

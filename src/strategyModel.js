@@ -1,7 +1,7 @@
-import { validateMarketBars } from "../api/_market-data-validation.js";
+import { selectClosedDailyBars } from "./dailyBars.js";
 import { ema } from "./screening.js";
 
-export const SWING_STRATEGY_VERSION = "swing-v0.1-experimental";
+export const SWING_STRATEGY_VERSION = "swing-v0.2-experimental";
 
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -13,13 +13,10 @@ export function assessSwingSetup(marketData, { ticker, marketStatus, now = Date.
   const unavailable = (reason) => ({ version: SWING_STRATEGY_VERSION, status: "NOT_ASSESSED", setups: [], plans: [], metrics: null, reasons: [reason] });
   if (!marketStatus || marketStatus.market === "off") return unavailable("Marknadskontrollen saknar tillförlitlig börsklocka.");
   if (String(marketData?.ticker || "").trim().toUpperCase() !== String(ticker || "").trim().toUpperCase()) return unavailable("Marknadsdatan matchar inte den valda aktien.");
-  if (marketData?.interval !== "1day") return unavailable("Swingupplägget kräver dagsdata.");
-  if (!Array.isArray(marketData?.bars) || !validateMarketBars(marketData.bars).valid) return unavailable("Validerade dagsdata saknas.");
-  const bars = marketStatus.isOpen ? marketData.bars.slice(0, -1) : marketData.bars;
-  if (bars.length < 60) return unavailable("Minst 60 färdigställda dagscandles krävs.");
+  const selection = selectClosedDailyBars(marketData, { marketStatus, now });
+  if (!selection.valid) return unavailable(selection.reasons.join(" "));
+  const bars = selection.bars;
   const latest = bars.at(-1);
-  const latestTime = Date.parse(`${latest.datetime.replace(" ", "T")}Z`);
-  if (!Number.isFinite(latestTime) || now - latestTime > 5 * 86400000 || latestTime > now + 900000) return unavailable("Senaste färdigställda dagsdata är för gammal eller har en ogiltig tidsstämpel.");
 
   const closes = bars.map((bar) => bar.close);
   const price = closes.at(-1);
@@ -32,6 +29,7 @@ export function assessSwingSetup(marketData, { ticker, marketStatus, now = Date.
   const priorHigh = Math.max(...recent.map((bar) => bar.high));
   const priorMedianVolume = median(recent.map((bar) => bar.volume));
   const volumeRatio = latest.volume / priorMedianVolume;
+  if (![price, ema20, ema50, atr, momentumPct, priorHigh, volumeRatio].every(Number.isFinite) || atr <= 0) return unavailable("Prisnivåerna gav ogiltiga indikatorer eller risknivåer.");
   const trend = price > ema20 && ema20 > ema50 && momentumPct > 0;
   const pullback = trend && latest.low <= ema20 + 0.2 * atr && latest.low >= ema20 - 0.8 * atr && latest.close > ema20;
   const breakout = trend && latest.close > priorHigh && volumeRatio >= 1.2;
@@ -44,6 +42,7 @@ export function assessSwingSetup(marketData, { ticker, marketStatus, now = Date.
     const riskPerShare = price - stop;
     return { setup, entry_reference: price, stop, target: price + 2 * riskPerShare, risk_per_share: riskPerShare, theoretical_risk_reward: 2 };
   });
+  if (plans.some((plan) => ![plan.stop, plan.target, plan.risk_per_share].every(Number.isFinite) || plan.stop <= 0 || plan.risk_per_share <= 0)) return unavailable("Upplägget gav ogiltiga stop- eller målnivåer.");
   return {
     version: SWING_STRATEGY_VERSION,
     status: setups.length ? "WATCH" : "NO_SETUP",
