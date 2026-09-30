@@ -305,9 +305,10 @@ export default function App() {
           const scan = trade.signal_inputs?.record_type === "SCAN";
           const realTrade = trade.signal_inputs?.record_type === "REAL_TRADE";
           const decision = trade.signal_inputs?.decision;
+          const scanAssessment = { NOT_ASSESSED: "ej bedömt", PARTIALLY_ASSESSED: "delvis bedömt", ASSESSED: "bedömt" }[trade.signal_inputs?.scan_status];
           return <article key={trade.trade_id} className="py-3 text-sm">
             <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? LABELS[decision?.status] || "NO TRADE" : realTrade ? `Faktisk trade · ${trade.direction}` : `Äldre post · ${trade.signal}`}</span></div>
-            <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}` : analysis ? "Analysförslag" : realTrade ? trade.trade_status : trade.trade_status}</p>
+            <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}${scanAssessment ? ` · ${scanAssessment}` : ""}` : analysis ? "Analysförslag" : realTrade ? trade.trade_status : trade.trade_status}</p>
             {realTrade && trade.trade_status === "CLOSED" && Number.isFinite(trade.result_percent) && <p>Nettoresultat: {trade.result_percent.toFixed(2)}%{Number.isFinite(trade.result_r) ? ` · ${trade.result_r.toFixed(2)}R` : ""} · {trade.winner === null ? "break-even" : trade.winner ? "vinst" : "förlust"}</p>}
             {realTrade && trade.trade_status === "OPEN" && <CloseTradeForm trade={trade} onClose={closeRealTrade} />}
             <Details title="journalpost"><pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto">{JSON.stringify(trade, null, 2)}</pre></Details>

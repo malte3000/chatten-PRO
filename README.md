@@ -76,7 +76,14 @@ Nyheter hämtas automatiskt för högst tre främsta tekniska kandidater.
 Negativa nyheter eller nyhetsfel blockerar kandidaten. Andra kandidater
 märks som utan nyhetsanalys och kan öppnas i den samlade analysen.
 Alla positiva kandidater stannar på AVVAKTA tills Risk Engine och tester finns.
-Warranter/certifikat erbjuds inte utan separat produktdata och riskanalys.
+Uppenbara hävstångsprodukter filtreras bort även när aktielistan felaktigt märker
+dem som Common Stock. Produktklassningen är ännu inte fullständigt verifierad;
+warranter/certifikat kräver separat produktdata och riskanalys.
+
+Om datakällan inte ger verifierbar kursdata för en symbol får den EJ BEDÖMT,
+inte NO TRADE. Om en hel Stockholmsbatch saknar verifierbar kursdata avbryts
+skanningen utan tradebedömning, så den inte fortsätter dra API-krediter eller
+visar ett falskt 20/20 NO TRADE-resultat.
 
 Serverendpoint `/api/scan` är autentiserad och väljer instrument på servern;
 klienten skickar inte godtyckliga tickers. `SCAN_BATCH_SIZE` är 1–8, standard 4.
@@ -94,8 +101,14 @@ Returnerad OHLCV sparas i rapportens data_snapshot tillsammans med tidszon,
 intervall och hämttid för att testerna ska kunna reproduceras utan framtida data.
 Dagskurser är börsens lokala sessionsdatum; intradagskurser begärs i UTC.
 Detta följer [Twelve Datas tidszonsregler för time_series](https://twelvedata.com/docs).
-Publik OMX/XSTO-listning är kontrollerad, men abonnemangets pris-/volymtäckning,
-livekvot och live-Supabase är inte verifierade. Tester använder simulerade svar.
+Publik OMX/XSTO-listning ger inte prisdatatäckning. Twelve Datas
+[EOD-guide](https://support.twelvedata.com/en/articles/12682324-end-of-day-eod-pricing-market-data)
+listar XSTO bland börser som kräver separat licens eller saknar EOD-data, och
+[XSTO-sidan](https://twelvedata.com/exchanges/xsto) visar referensdata men inga
+Core price-endpoints. Därför kan Sverige inte användas för denna skanner utan
+verifierat stöd för samma börs och intervall hos datakällan. Kontots specifika
+behörighet, livekvot och live-Supabase är inte verifierade. Tester använder
+simulerade svar.
 
 Providerreferenser: [instrumentlistor](https://support.twelvedata.com/en/articles/5620513-how-to-find-all-available-symbols-at-twelve-data),
 [batch och krediter](https://support.twelvedata.com/en/articles/5203360-batch-api-requests).

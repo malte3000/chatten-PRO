@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { rankCandidates, SCREEN_VERSION } from "./screening.js";
 import { fetchJson } from "./apiClient.js";
 
-const LABELS = { WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
+const LABELS = { WAIT: "AVVAKTA", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT · KURSDATA EJ VERIFIERAD" };
 
 async function api(url, body, signal) {
   return fetchJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
@@ -113,14 +113,17 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     } finally {
       if (version === revision.current) {
         const final = { results: rankCandidates(results), checked: offset, target, universeSize, complete, seed, scanError };
-        setReport(final); setBusy(false); setProgress("");
+        const assessedCount = final.results.filter((item) => item.status === "WAIT" || item.status === "NO_TRADE").length;
+        const unavailableCount = final.results.filter((item) => item.status === "NOT_ASSESSED").length;
+        const scanStatus = assessedCount === 0 ? "NOT_ASSESSED" : unavailableCount > 0 ? "PARTIALLY_ASSESSED" : "ASSESSED";
+        setReport(offset > 0 ? final : null); setBusy(false); setProgress("");
         if (offset > 0) {
           const snapshot = {
             trade_id: `SCAN-${crypto.randomUUID()}`, strategy_version: SCREEN_VERSION,
             ticker: market === "usa" ? "SCAN-USA" : "SCAN-SE", timestamp: new Date().toISOString(),
             signal: "NO_TRADE", direction: "NONE", confidence: 0, trade_status: "NO_TRADE",
             risk_engine_status: "NOT_EVALUATED", winner: null, result_percent: null,
-            signal_inputs: { record_type: "SCAN", market, horizon, ...final, probability_calibrated: false },
+            signal_inputs: { record_type: "SCAN", market, horizon, ...final, scan_status: scanStatus, probability_calibrated: false },
             learning_tags: ["screening_only"], detected_errors: scanError ? [scanError] : [],
           };
           setRecord(snapshot); void save(snapshot, version);
@@ -131,6 +134,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
 
   const candidates = report?.results.filter((item) => item.status === "WAIT") || [];
   const rejected = report?.results.filter((item) => item.status === "NO_TRADE") || [];
+  const unavailable = report?.results.filter((item) => item.status === "NOT_ASSESSED") || [];
   return <section className="border border-cyan-900 rounded-lg p-4 space-y-3" aria-label="Marknadsskanner">
     <div className="flex flex-wrap gap-3 items-end">
       <label className="text-xs text-slate-400">Skanningsbudget
@@ -143,13 +147,19 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     </div>
     <p className="text-xs text-slate-400">Automatiskt, dagligt varierat urval av stödda aktier. Inte hela börsen. Skanningen kan ta flera minuter på grund av API-kvoten. Nyheter hämtas för högst tre kandidater.</p>
     {market === "off" && <p className="text-sm text-amber-300">Välj USA eller Sverige för att ange vilken marknad som ska skannas. Av finns kvar för manuell analys.</p>}
-    <p className="text-xs text-slate-400">Warranter och certifikat stöds inte ännu: separat produktdata och riskkontroll krävs.</p>
+    <p className="text-xs text-slate-400">Skannern försöker utesluta warranter och certifikat, men datakällans produktklassning behöver verifieras. Separat produktdata och riskkontroll krävs för dem.</p>
+    {market === "stockholm" && <p className="text-xs text-slate-400">Sveriges aktielista kan innehålla instrument utan tillgänglig prisdata. De markeras EJ BEDÖMT; ingen teknisk slutsats dras.</p>}
     {progress && <p role="status" className="text-sm text-cyan-300">{progress}</p>}
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
-      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} analyskandidater · {rejected.length} bortgallrade. Inga godkända TRADE-signaler.</p>
-      {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{report.complete ? `NO TRADE i det här urvalet · Ingen av de ${report.checked} kontrollerade aktierna blev analyskandidat.` : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${report.checked} kontrollerade aktierna.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
+      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} analyskandidater · {rejected.length} bortgallrade · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
+      {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{rejected.length === 0
+        ? `EJ BEDÖMT · Ingen av de ${report.checked} kontrollerade aktierna kunde bedömas med tillgänglig prisdata.`
+        : report.complete
+          ? `NO TRADE för de ${rejected.length} bedömda aktierna i det här urvalet. Ingen blev analyskandidat.`
+          : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${rejected.length} bedömda aktierna.`}
+        {unavailable.length > 0 && rejected.length > 0 && ` ${unavailable.length} aktier kunde inte bedömas eftersom kursdata inte kunde verifieras.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
       {candidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
@@ -162,9 +172,9 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
           <pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto mt-2">{JSON.stringify({ metrics: item.metrics, news: item.news || null, data_snapshot: item.data_snapshot || null }, null, 2)}</pre>
         </details>
       </article>)}
-      <details className="border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-cyan-300">Se mer – alla {report.results.length} kontroller och bortgallringar</summary>
+      <details className="border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-cyan-300">Se mer – alla {report.results.length} instrument och bedömningar</summary>
         <p className="text-xs text-slate-400 mt-2">Försöksfilter: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent, tillräcklig candle-omsättning. {horizon === "week" ? "Swing använder bara färdigställda dagskurser." : "Senaste 15-minuterscandle kan vara ofullständig."} Ingen validerad edge eller uppmätt träffsäkerhet.</p>
-        {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong>{item.symbol} · {item.exchange} · {LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
+        {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong className={item.status === "NOT_ASSESSED" ? "text-amber-300" : undefined}>{item.symbol} · {item.exchange} · {LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
       </details>
       <p role="status" className="text-xs text-slate-400">{saveState === "saved" ? "Skanningsrapporten är sparad i journalen, separat från faktiska trades." : saveState === "saving" ? "Sparar skanningsrapport…" : saveState === "read_only" ? "Skanningsresultatet visas här, men previewns gemensamma journal är skrivskyddad. En BEVAKA-kandidat kan sparas separat i den lokala paperloggen efter samlad analys." : "Skanningen är inte sparad."}</p>
       {saveState === "failed" && record && <button className="text-sm text-cyan-300" onClick={() => save(record, revision.current)}>Försök spara skanningen igen</button>}

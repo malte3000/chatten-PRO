@@ -25,6 +25,14 @@ function hash(value) {
   return result >>> 0;
 }
 
+function isClearlyUnsupportedProduct(item) {
+  const symbol = String(item.symbol || "").toUpperCase();
+  const name = String(item.name || "").toUpperCase();
+  return /^(?:BULL|BEAR|MINI|TURBO)(?:[.\s-]|$)/.test(symbol) ||
+    /\.AVA\./.test(symbol) ||
+    /\b(?:WARRANT|CERTIFICATE|MINI FUTURE|TURBO|BULL CERTIFICATE|BEAR CERTIFICATE)\b/.test(name);
+}
+
 export async function getUniverse(market, now = Date.now()) {
   const cached = universeCache.get(market);
   if (cached && now - cached.time < 3 * 3600000) return cached.items;
@@ -37,7 +45,7 @@ export async function getUniverse(market, now = Date.now()) {
     const exchange = String(item.exchange || "");
     const supportedExchange = market === "usa" ? ["NASDAQ", "NYSE"].includes(exchange.toUpperCase()) : item.mic_code === "XSTO" || /stockholm|^OMX$/i.test(exchange);
     const key = `${item.symbol}:${exchange}`;
-    if (!supportedExchange || item.type !== "Common Stock" || item.country !== country || !/^[A-Z0-9._ -]{1,20}$/i.test(item.symbol || "") || seen.has(key)) return false;
+    if (!supportedExchange || item.type !== "Common Stock" || item.country !== country || !/^[A-Z0-9._ -]{1,20}$/i.test(item.symbol || "") || isClearlyUnsupportedProduct(item) || seen.has(key)) return false;
     seen.add(key); return true;
   }).map((item) => ({ symbol: item.symbol.toUpperCase(), name: String(item.name || item.symbol), exchange: String(item.exchange), mic_code: item.mic_code || null, currency: item.currency, country }));
   if (!items.length) throw new ScanError("Inga stödda aktier hittades på vald marknad. Sverigetäckning måste verifieras hos datakällan.");
@@ -64,7 +72,8 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
     const raw = selection.length === 1 && data.values ? data : data[`${instrument.symbol}:${instrument.exchange}`] || data[instrument.symbol];
     if (Number(raw?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Skanningen är inte komplett.", 429, 61000);
     if (!raw || raw.status === "error" || !Array.isArray(raw.values) || raw.meta?.symbol?.toUpperCase() !== instrument.symbol || raw.meta?.exchange?.toUpperCase() !== instrument.exchange.toUpperCase() || raw.meta?.currency !== instrument.currency) {
-      return { ...instrument, status: "NO_TRADE", rank_score: 0, metrics: null, reasons: ["Giltig prisdata för rätt aktie och börs saknas."] };
+      const data_issue = !raw ? "MISSING_SERIES" : raw.status === "error" ? "PROVIDER_REJECTED" : !Array.isArray(raw.values) ? "INVALID_SERIES" : "IDENTITY_MISMATCH";
+      return { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, data_issue, reasons: ["Kursdata för rätt aktie och börs kunde inte verifieras. Strategin har inte bedömts."] };
     }
     const toNumber = (value) => value === null || value === undefined || value === "" ? null : Number(value);
     const bars = raw.values.map((bar) => ({ datetime: bar.datetime, open: toNumber(bar.open), high: toNumber(bar.high), low: toNumber(bar.low), close: toNumber(bar.close), volume: toNumber(bar.volume) })).reverse();
@@ -86,6 +95,9 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
       },
     };
   });
+  if (market === "stockholm" && results.every((item) => item.status === "NOT_ASSESSED")) {
+    throw new ScanError("Stockholmsbörsens kursdata kunde inte verifieras hos datakällan. Skanningen avbröts utan tradebedömning. Kontrollera datatäckning och abonnemang.");
+  }
   const nextOffset = offset + selection.length;
   return { results: rankCandidates(results), next_offset: nextOffset, done: nextOffset >= total, total, universe_size: universe.length, wait_ms: nextOffset >= total ? 0 : 61000, fetched_at: new Date(now).toISOString() };
 }

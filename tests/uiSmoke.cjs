@@ -24,6 +24,12 @@ function createMockApi() {
   }
   function handleApi({ pathname, method = "GET", body: input = {}, searchParams = new URLSearchParams() }) {
     if (pathname === "/api/session") return { status: 200, body: { authenticated: true } };
+    if (pathname === "/api/scan" && input.market === "stockholm") return { status: 200, body: {
+      results: [
+        { symbol: "TESTA", name: "Testbolag A", exchange: "OMX", currency: "SEK", status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons: ["Kursdata för rätt aktie och börs kunde inte verifieras."] },
+        { symbol: "TESTB", name: "Testbolag B", exchange: "OMX", currency: "SEK", status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons: ["Kursdata för rätt aktie och börs kunde inte verifieras."] },
+      ], next_offset: 2, total: 2, universe_size: 200, done: true, wait_ms: 0,
+    } };
     if (pathname === "/api/scan") return { status: 200, body: {
       results: [
         { symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 4, metrics: { rvol: 2, atr: 2 }, reasons: ["Experimental trend filters passed"] },
@@ -99,6 +105,7 @@ async function runSmoke() {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      if (url.pathname.endsWith(".js")) { await route.continue(); return; }
       const input = request.postData() ? request.postDataJSON() : {};
       const { status, body } = mock.handleApi({ pathname: url.pathname, method: request.method(), body: input, searchParams: url.searchParams });
       await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -106,6 +113,17 @@ async function runSmoke() {
     await page.goto(process.env.TEST_URL || "http://127.0.0.1:5173");
     try { await page.getByRole("heading", { name: "Sannolikhetsterminal", exact: true }).waitFor({ timeout: 10000 }); }
     catch (error) { console.log("UI diagnostics:", await page.locator("body").innerText(), errors); throw error; }
+    await page.getByLabel("Marknad (välj aktiens börs)").selectOption("stockholm");
+    const swedishScanner = page.getByRole("region", { name: "Marknadsskanner" });
+    await swedishScanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
+    await swedishScanner.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
+    await swedishScanner.getByText(/EJ BEDÖMT · Ingen av de 2 kontrollerade aktierna kunde bedömas/).waitFor();
+    assert.equal((await swedishScanner.innerText()).includes("NO TRADE"), false);
+    assert.equal(saved[0].signal_inputs.scan_status, "NOT_ASSESSED");
+    assert.deepEqual(saved[0].signal_inputs.results.map((item) => item.status), ["NOT_ASSESSED", "NOT_ASSESSED"]);
+    await swedishScanner.getByText("Se mer – alla 2 instrument och bedömningar").click();
+    await swedishScanner.getByText("TESTA · OMX · EJ BEDÖMT · KURSDATA EJ VERIFIERAD").waitFor();
+    await page.getByLabel("Marknad (välj aktiens börs)").selectOption("usa");
     const scanner = page.getByRole("region", { name: "Marknadsskanner" });
     await scanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
@@ -199,7 +217,7 @@ async function runSmoke() {
       await page.getByRole("region", { name: "Samlad analys" }).getByText("EJ BEDÖMT", { exact: true }).waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: scanner, swing watch/risk calculation, actual trade save/close, details, ticker invalidation, mobile layout, missing-provider regression.");
+    console.log("Browser smoke passed: scanner, swing watch/risk calculation, actual trade save/close, details, ticker invalidation, mobile layout, missing-provider and unavailable Swedish scan regressions.");
   } finally { await browser.close(); }
 }
 
