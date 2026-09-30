@@ -2,7 +2,7 @@ import { validateMarketBars } from "../api/_market-data-validation.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 
-export const SCREEN_VERSION = "v0.2-experimental";
+export const SCREEN_VERSION = "v0.3-experimental";
 
 export function ema(values, period) {
   if (values.length < period) return null;
@@ -14,23 +14,26 @@ export function ema(values, period) {
 
 export function screenInstrument(instrument, marketData, { horizon = "week", market = null, now = Date.now() } = {}) {
   const reasons = [];
-  const base = { ...instrument, status: "NO_TRADE", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null };
+  const base = { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null, data_issue: null };
+  const unavailable = (code, reason) => { base.data_issue = code; reasons.push(reason); return base; };
   const sourceBars = marketData?.bars;
-  if (marketData?.ticker !== instrument.symbol || !Array.isArray(sourceBars) || sourceBars.length < 60) {
-    reasons.push("Minst 60 giltiga candles för rätt instrument krävs."); return base;
-  }
+  if (marketData?.ticker !== instrument.symbol) return unavailable("INSTRUMENT_MISMATCH", "Kursdatan matchar inte den valda aktien.");
+  if (!Array.isArray(sourceBars) || sourceBars.length < 60) return unavailable("INSUFFICIENT_BARS", "Minst 60 giltiga candles för rätt instrument krävs.");
   let bars = sourceBars;
   if (horizon === "week") {
     if (!["usa", "stockholm"].includes(market) || !Number.isFinite(now)) {
-      reasons.push("Tillförlitlig börsklocka saknas för färdigställda dagskurser."); return base;
+      return unavailable("MARKET_CLOCK_UNVERIFIED", "Tillförlitlig börsklocka saknas för färdigställda dagskurser.");
     }
     const marketStatus = getMarketStatus(market, new Date(now));
     // The current session may have zero volume or an unfinished OHLC range.
     // Exclude it before validating the completed bars used for screening.
     const unfinishedDate = marketStatus.reason === "after_close" ? null : marketStatus.sessionDate;
     const completedBars = unfinishedDate ? sourceBars.filter((bar) => bar?.datetime !== unfinishedDate) : sourceBars;
+    if (completedBars.some((bar) => !Number.isFinite(bar?.volume) || bar.volume <= 0)) {
+      return unavailable("UNRELIABLE_VOLUME", "Positiv och tillförlitlig volym krävs för varje använd dagskurs.");
+    }
     const selection = selectClosedDailyBars({ ...marketData, bars: completedBars }, { marketStatus, now, minBars: 60 });
-    if (!selection.valid) { reasons.push(...selection.reasons); return base; }
+    if (!selection.valid) return unavailable("INVALID_DAILY_DATA", selection.reasons.join(" "));
     bars = selection.bars;
     base.screening_selection = {
       latest_closed_datetime: selection.latestDate,
@@ -39,16 +42,16 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
       time_zone: selection.timeZone,
     };
   } else if (!validateMarketBars(bars).valid) {
-    reasons.push("Minst 60 giltiga candles för rätt instrument krävs."); return base;
+    return unavailable("INVALID_INTRADAY_DATA", "Minst 60 giltiga candles för rätt instrument krävs.");
   }
   if (bars.some((bar) => !Number.isFinite(bar.volume) || bar.volume <= 0)) {
-    reasons.push("Tillförlitlig volymdata saknas."); return base;
+    return unavailable("UNRELIABLE_VOLUME", "Tillförlitlig volymdata saknas.");
   }
   // Request UTC timestamps from the provider; never assume local-exchange time.
   const latestTime = Date.parse(`${bars.at(-1).datetime.replace(" ", "T")}Z`);
   const maxAge = horizon === "week" ? 7 * 86400000 : 36 * 3600000;
   if (!Number.isFinite(latestTime) || now - latestTime > maxAge || latestTime > now + 900000) {
-    reasons.push("Prisdatans tid är ogiltig eller för gammal för horisonten."); return base;
+    return unavailable("STALE_OR_INVALID_PRICE_TIME", "Prisdatans tid är ogiltig eller för gammal för horisonten.");
   }
   const closes = bars.map((bar) => bar.close);
   const price = closes.at(-1);
@@ -63,7 +66,11 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
   const momentumPct = (price / closes.at(-6) - 1) * 100;
   const atrPct = atr / price * 100;
   const minimumTurnover = instrument.currency === "USD" ? 1e6 : instrument.currency === "SEK" ? 1e7 : null;
+  if (![price, ema20, ema50, atr, avgVolume, rvol, turnover, momentumPct, atrPct].every(Number.isFinite) || avgVolume <= 0) {
+    return unavailable("INVALID_INDICATORS", "Pris- eller volymdata gav ogiltiga indikatorer.");
+  }
   base.metrics = { price, ema20, ema50, atr, atr_pct: atrPct, rvol, momentum_pct: momentumPct, average_bar_turnover: turnover, latest_datetime: bars.at(-1).datetime };
+  base.status = "NO_TRADE";
   if (minimumTurnover === null || turnover < minimumTurnover) reasons.push("För låg omsättning eller ej stödd valuta.");
   if (atrPct < 0.2 || atrPct > 8) reasons.push("Volatilitet utanför skannerns försöksintervall.");
   if (!(price > ema20 && ema20 > ema50)) reasons.push("Ingen tydlig positiv EMA-trend.");

@@ -24,13 +24,24 @@ test("positive candidate passes experimental filters but cannot become TRADE", (
   assert.equal(result.rank_score, 4);
   assert.deepEqual(result, screenInstrument(instrument, structuredClone(data), swingOptions));
 });
-test("wrong ticker, insufficient bars, and missing volume fail closed", () => {
-  for (const value of [{ ...data, ticker: "AMD" }, { ...data, bars: bars.slice(-30) }, { ...data, bars: bars.map((bar) => ({ ...bar, volume: null })) }]) {
-    assert.equal(screenInstrument(instrument, value, swingOptions).status, "NO_TRADE");
+test("wrong ticker, insufficient bars, and missing volume are not assessed", () => {
+  for (const [value, dataIssue] of [
+    [{ ...data, ticker: "AMD" }, "INSTRUMENT_MISMATCH"],
+    [{ ...data, bars: bars.slice(-30) }, "INSUFFICIENT_BARS"],
+    [{ ...data, bars: bars.map((bar) => ({ ...bar, volume: null })) }, "UNRELIABLE_VOLUME"],
+  ]) {
+    const result = screenInstrument(instrument, value, swingOptions);
+    assert.equal(result.status, "NOT_ASSESSED");
+    assert.equal(result.data_issue, dataIssue);
+    assert.equal(result.metrics, null);
   }
 });
 test("old or future timestamps are rejected", () => {
-  for (const clock of [now + 8 * 86400000, now - 2 * 86400000]) assert.equal(screenInstrument(instrument, data, { market: "usa", now: clock }).status, "NO_TRADE");
+  for (const clock of [now + 8 * 86400000, now - 2 * 86400000]) {
+    const result = screenInstrument(instrument, data, { market: "usa", now: clock });
+    assert.equal(result.status, "NOT_ASSESSED");
+    assert.ok(result.data_issue);
+  }
 });
 test("swing screen discards an unfinished daily candle and uses it only after close", () => {
   const current = { datetime: "2026-09-16", open: 150, high: 151, low: 149, close: 150, volume: 100 };
@@ -59,9 +70,26 @@ test("swing screen fails closed without matching exchange timezone or market clo
     { marketData: data, options: { market: "usa", now: Number.NaN } },
   ]) {
     const result = screenInstrument(instrument, variant.marketData, variant.options);
-    assert.equal(result.status, "NO_TRADE");
+    assert.equal(result.status, "NOT_ASSESSED");
+    assert.ok(result.data_issue);
     assert.equal(result.metrics, null);
   }
+});
+test("one unreliable historical volume bar is an unavailable assessment, not a filter rejection", () => {
+  const historicalVolumeGap = bars.map((bar, index) => index === 12 ? { ...bar, volume: 0 } : bar);
+  const result = screenInstrument(instrument, { ...data, bars: historicalVolumeGap }, swingOptions);
+  assert.equal(result.status, "NOT_ASSESSED");
+  assert.equal(result.data_issue, "UNRELIABLE_VOLUME");
+  assert.equal(result.metrics, null);
+  assert.match(result.reasons.join(" "), /volym/);
+});
+test("valid prices failing only the relative-volume filter remain NO_TRADE", () => {
+  const ordinaryVolume = bars.map((bar, index) => ({ ...bar, volume: index === bars.length - 1 ? 8e5 : 1e6 }));
+  const result = screenInstrument(instrument, { ...data, bars: ordinaryVolume }, swingOptions);
+  assert.equal(result.status, "NO_TRADE");
+  assert.equal(result.data_issue, null);
+  assert.ok(result.metrics);
+  assert.deepEqual(result.reasons, ["Senaste candle har inte förhöjd volym."]);
 });
 test("falling prices and low liquidity cannot pass", () => {
   const falling = bars.map((bar, index) => ({ ...bar, open: 199 - index, close: 199 - index, high: 200 - index, low: 198 - index }));

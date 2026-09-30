@@ -56,9 +56,11 @@ svarar med HTML i stället för JSON.
 Standardläget **Skanna marknaden** kräver inte en ticker. Välj USA/Sverige,
 swing/daytrade och budget 20, 40 eller 100 aktier. Instrument hämtas automatiskt
 från Twelve Datas `/stocks` (Common Stock, NASDAQ/NYSE eller OMX/XSTO).
-Urvalet är deterministiskt för UTC-datum och varierar dagligen; det är INTE
-hela börsen eller de bevisat bästa aktierna. Antal kontrollerade, lista och
-bortgallringar visas. Av kräver att användaren väljer marknad för skanning.
+Urvalet är deterministiskt för UTC-datum och varierar dagligen; ett nytt klick
+samma dag ger normalt samma första 20, och en större budget utökar urvalet.
+Det är INTE hela börsen eller de bevisat bästa aktierna. Antal kontrollerade,
+lista och bortgallringar visas. Av kräver att användaren väljer marknad för
+skanning.
 
 Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
@@ -84,6 +86,10 @@ Om datakällan inte ger verifierbar kursdata för en symbol får den EJ BEDÖMT,
 inte NO TRADE. Om en hel Stockholmsbatch saknar verifierbar kursdata avbryts
 skanningen utan tradebedömning, så den inte fortsätter dra API-krediter eller
 visar ett falskt 20/20 NO TRADE-resultat.
+Från `v0.3-experimental` gäller EJ BEDÖMT även när en prisserie inte går att
+bedöma på grund av för få candles, ogiltig klocka, för gamla data eller
+otillförlitlig volym. Giltiga data som inte klarar de tekniska försöksfiltren
+ger fortfarande NO TRADE.
 
 Serverendpoint `/api/scan` är autentiserad och väljer instrument på servern;
 klienten skickar inte godtyckliga tickers. `SCAN_BATCH_SIZE` är 1–8, standard 4.

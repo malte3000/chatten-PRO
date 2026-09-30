@@ -145,7 +145,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
       <button className="rounded bg-cyan-300 text-slate-950 px-5 py-3 font-semibold disabled:opacity-40" disabled={busy || market === "off"} onClick={start}>{busy ? "Skannar…" : "Skanna marknaden"}</button>
       {busy && <button className="border border-slate-700 rounded px-3 py-2" onClick={() => controller.current?.abort()}>Stoppa</button>}
     </div>
-    <p className="text-xs text-slate-400">Automatiskt, dagligt varierat urval av stödda aktier. Inte hela börsen. Skanningen kan ta flera minuter på grund av API-kvoten. Nyheter hämtas för högst tre kandidater.</p>
+    <p className="text-xs text-slate-400">Automatiskt urval av stödda aktier, inte hela börsen. Ett nytt klick samma UTC-dag ger normalt samma aktier; en större budget utökar urvalet. Skanningen kan ta flera minuter på grund av API-kvoten. Nyheter hämtas för högst tre kandidater.</p>
     {market === "off" && <p className="text-sm text-amber-300">Välj USA eller Sverige för att ange vilken marknad som ska skannas. Av finns kvar för manuell analys.</p>}
     <p className="text-xs text-slate-400">Skannern försöker utesluta warranter och certifikat, men datakällans produktklassning behöver verifieras. Separat produktdata och riskkontroll krävs för dem.</p>
     {market === "stockholm" && <p className="text-xs text-slate-400">Sveriges aktielista kan innehålla instrument utan tillgänglig prisdata. De markeras EJ BEDÖMT; ingen teknisk slutsats dras.</p>}
