@@ -68,7 +68,7 @@ test("Swedish provider candles can produce WAIT candidates, never TRADE", async 
     assert.equal(request.searchParams.get("symbol"), "DEMO:OMX");
     const values = Array.from({ length: 100 }, (_, index) => {
       const close = 50 + index;
-      return { datetime: new Date(clock - (99 - index) * 86400000).toISOString().slice(0, 10), open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(close), volume: index === 99 ? "2000000" : "1000000" };
+      return { datetime: new Date(clock - (100 - index) * 86400000).toISOString().slice(0, 10), open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(close), volume: index === 99 ? "2000000" : "1000000" };
     }).reverse();
     return { ok: true, json: async () => ({ meta: { symbol: "DEMO", exchange: "OMX", currency: "SEK", exchange_timezone: "Europe/Stockholm" }, values }) };
   };
@@ -82,4 +82,5 @@ test("Swedish provider candles can produce WAIT candidates, never TRADE", async 
   assert.equal(res.data.results[0].data_snapshot.bars.length, 100);
   assert.equal(res.data.results[0].data_snapshot.timestamp_timezone, "Europe/Stockholm");
   assert.equal(res.data.results[0].data_snapshot.timestamp_kind, "exchange_session_date");
+  assert.equal(res.data.results[0].data_snapshot.screening_selection.latest_closed_datetime, res.data.results[0].data_snapshot.bars.at(-1).datetime);
 });

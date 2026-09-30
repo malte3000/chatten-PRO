@@ -1,6 +1,8 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
+import { getMarketStatus } from "../api/_market-hours.js";
+import { selectClosedDailyBars } from "./dailyBars.js";
 
-export const SCREEN_VERSION = "v0.1-experimental";
+export const SCREEN_VERSION = "v0.2-experimental";
 
 export function ema(values, period) {
   if (values.length < period) return null;
@@ -10,11 +12,33 @@ export function ema(values, period) {
   return value;
 }
 
-export function screenInstrument(instrument, marketData, { horizon = "week", now = Date.now() } = {}) {
+export function screenInstrument(instrument, marketData, { horizon = "week", market = null, now = Date.now() } = {}) {
   const reasons = [];
-  const base = { ...instrument, status: "NO_TRADE", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION };
-  const bars = marketData?.bars;
-  if (marketData?.ticker !== instrument.symbol || !validateMarketBars(bars).valid || bars.length < 60) {
+  const base = { ...instrument, status: "NO_TRADE", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null };
+  const sourceBars = marketData?.bars;
+  if (marketData?.ticker !== instrument.symbol || !Array.isArray(sourceBars) || sourceBars.length < 60) {
+    reasons.push("Minst 60 giltiga candles för rätt instrument krävs."); return base;
+  }
+  let bars = sourceBars;
+  if (horizon === "week") {
+    if (!["usa", "stockholm"].includes(market) || !Number.isFinite(now)) {
+      reasons.push("Tillförlitlig börsklocka saknas för färdigställda dagskurser."); return base;
+    }
+    const marketStatus = getMarketStatus(market, new Date(now));
+    // The current session may have zero volume or an unfinished OHLC range.
+    // Exclude it before validating the completed bars used for screening.
+    const unfinishedDate = marketStatus.reason === "after_close" ? null : marketStatus.sessionDate;
+    const completedBars = unfinishedDate ? sourceBars.filter((bar) => bar?.datetime !== unfinishedDate) : sourceBars;
+    const selection = selectClosedDailyBars({ ...marketData, bars: completedBars }, { marketStatus, now, minBars: 60 });
+    if (!selection.valid) { reasons.push(...selection.reasons); return base; }
+    bars = selection.bars;
+    base.screening_selection = {
+      latest_closed_datetime: selection.latestDate,
+      session_date: selection.sessionDate,
+      excluded_current_session: completedBars.length !== sourceBars.length || selection.excludedCurrentSession,
+      time_zone: selection.timeZone,
+    };
+  } else if (!validateMarketBars(bars).valid) {
     reasons.push("Minst 60 giltiga candles för rätt instrument krävs."); return base;
   }
   if (bars.some((bar) => !Number.isFinite(bar.volume) || bar.volume <= 0)) {

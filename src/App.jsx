@@ -174,7 +174,10 @@ export default function App() {
       if (snapshot.version === revision.current) setSaveState("saved");
       void refreshHistory();
     } catch (error) {
-      if (snapshot.version === revision.current) { setSaveState("failed"); setNotice(`Analysen kunde inte sparas: ${error.message}`); }
+      if (snapshot.version === revision.current) {
+        if (error.code === "PREVIEW_READ_ONLY") setSaveState("read_only");
+        else { setSaveState("failed"); setNotice(`Analysen kunde inte sparas: ${error.message}`); }
+      }
     }
   }
 
@@ -278,7 +281,7 @@ export default function App() {
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
         </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
-        <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : "Inte sparat i journalen."}</p>
+        <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad. Paperloggen sparas separat i webbläsaren." : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
         <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />
         <Details title="nyheter, graf och data">

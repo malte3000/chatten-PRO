@@ -272,6 +272,7 @@ test("preview cannot write to Supabase unless explicitly enabled", async (t) => 
   const blocked = response();
   await tradesHandler({ method: "POST", headers, body: {} }, blocked);
   assert.equal(blocked.code, 409);
+  assert.equal(blocked.data.code, "PREVIEW_READ_ONLY");
   assert.equal(calls, 0);
   const read = response();
   await tradesHandler({ method: "GET", headers }, read);

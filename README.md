@@ -66,8 +66,11 @@ Försöksfilter: pris > EMA20 > EMA50, positivt fem-candle-momentum, RVOL >= 1,
 ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
 För daytrade gäller omsättningen per 15-minuterscandle, inte per dag.
 RVOL jämför senaste candle med föregående 20 candles; inte samma klockslag
-andra dagar. Senaste candle kan vara ofullständig. Dessa startregler är inte
-backtestade och kan missa bra lägen. Filterpoäng 0–4 är aldrig vinstsannolikhet.
+andra dagar. I swingläge används bara färdigställda dagskurser enligt vald
+börs klocka; en pågående dagskurs räknas inte in i försöksfiltren.
+I daytradeläge kan senaste 15-minuterscandle vara ofullständig. Dessa
+startregler är inte backtestade och kan missa bra lägen. Filterpoäng 0–4 är
+aldrig vinstsannolikhet.
 
 Nyheter hämtas automatiskt för högst tre främsta tekniska kandidater.
 Negativa nyheter eller nyhetsfel blockerar kandidaten. Andra kandidater
@@ -222,7 +225,8 @@ Deployment kräver separat Vercel-projektåtkomst och tabelländringar separat
 Supabase SQL-/administrationsåtkomst.
 
 Vercel Preview blockerar skrivningar (POST/PATCH) till journalen som standard även om miljön
-ärver produktionsnycklar. Sparfel visas då medvetet i appen. Aktivera
+ärver produktionsnycklar. Skanning och analys visas ändå, med tydlig status att
+deras rapporter inte har journalförts. Aktivera
 `PREVIEW_ALLOW_WRITES=true` endast efter att preview pekar på en separat
 testdatabas. Läsning och analys är fortfarande tillåtna och externa analyser
 förbrukar API-krediter; ingen livekörning ingår i de automatiska testerna.

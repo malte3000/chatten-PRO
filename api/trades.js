@@ -94,6 +94,7 @@ export default async function handler(req, res) {
   // Preview deployments may inherit production credentials. Never write by default.
   if (["POST", "PATCH"].includes(req.method) && process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_ALLOW_WRITES !== "true") {
     return res.status(409).json({
+      code: "PREVIEW_READ_ONLY",
       error: "Sparande är avstängt i testmiljön",
       message: "Aktivera endast PREVIEW_ALLOW_WRITES med en separat testdatabas.",
     });

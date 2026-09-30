@@ -45,7 +45,10 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
       if (version === revision.current) setSaveState("saved");
       onSaved();
     } catch (problem) {
-      if (version === revision.current) { setSaveState("failed"); setError(`Skanningen kunde inte sparas: ${problem.message}`); }
+      if (version === revision.current) {
+        if (problem.code === "PREVIEW_READ_ONLY") setSaveState("read_only");
+        else { setSaveState("failed"); setError(`Skanningen kunde inte sparas: ${problem.message}`); }
+      }
     }
   }
 
@@ -146,7 +149,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
       <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} analyskandidater · {rejected.length} bortgallrade. Inga godkända TRADE-signaler.</p>
-      {!busy && !candidates.length && <p className="text-sm">NO TRADE · Inga kandidater klarade filtren i det kontrollerade urvalet.</p>}
+      {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{report.complete ? `NO TRADE i det här urvalet · Ingen av de ${report.checked} kontrollerade aktierna blev analyskandidat.` : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${report.checked} kontrollerade aktierna.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
       {candidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
@@ -160,10 +163,10 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         </details>
       </article>)}
       <details className="border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-cyan-300">Se mer – alla {report.results.length} kontroller och bortgallringar</summary>
-        <p className="text-xs text-slate-400 mt-2">Försöksfilter: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent, tillräcklig candle-omsättning. Senaste candle kan vara ofullständig. Ingen validerad edge eller uppmätt träffsäkerhet.</p>
+        <p className="text-xs text-slate-400 mt-2">Försöksfilter: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent, tillräcklig candle-omsättning. {horizon === "week" ? "Swing använder bara färdigställda dagskurser." : "Senaste 15-minuterscandle kan vara ofullständig."} Ingen validerad edge eller uppmätt träffsäkerhet.</p>
         {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong>{item.symbol} · {item.exchange} · {LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
       </details>
-      <p role="status" className="text-xs text-slate-400">{saveState === "saved" ? "Skanningsrapporten är sparad i journalen, separat från faktiska trades." : saveState === "saving" ? "Sparar skanningsrapport…" : "Skanningen är inte sparad."}</p>
+      <p role="status" className="text-xs text-slate-400">{saveState === "saved" ? "Skanningsrapporten är sparad i journalen, separat från faktiska trades." : saveState === "saving" ? "Sparar skanningsrapport…" : saveState === "read_only" ? "Skanningsresultatet visas här, men previewns gemensamma journal är skrivskyddad. En BEVAKA-kandidat kan sparas separat i den lokala paperloggen efter samlad analys." : "Skanningen är inte sparad."}</p>
       {saveState === "failed" && record && <button className="text-sm text-cyan-300" onClick={() => save(record, revision.current)}>Försök spara skanningen igen</button>}
     </>}
   </section>;

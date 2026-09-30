@@ -11,6 +11,7 @@ export async function fetchJson(url, options = {}) {
       ? message.trim()
       : `Servern svarade med HTTP ${response.status} utan ett läsbart API-fel. Kontrollera deployment- och funktionsloggarna.`);
     error.status = response.status;
+    error.code = data?.code;
     error.retryMs = data?.retry_after_ms;
     throw error;
   }

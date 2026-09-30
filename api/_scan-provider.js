@@ -68,14 +68,21 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
     }
     const toNumber = (value) => value === null || value === undefined || value === "" ? null : Number(value);
     const bars = raw.values.map((bar) => ({ datetime: bar.datetime, open: toNumber(bar.open), high: toNumber(bar.high), low: toNumber(bar.low), close: toNumber(bar.close), volume: toNumber(bar.volume) })).reverse();
-    const marketData = { ticker: instrument.symbol, bars, validation: validateMarketBars(bars) };
+    const marketData = {
+      ticker: instrument.symbol,
+      interval: horizon === "week" ? "1day" : "15min",
+      timezone: raw.meta?.exchange_timezone || null,
+      bars,
+      validation: validateMarketBars(bars),
+    };
+    const screened = screenInstrument(instrument, marketData, { horizon, market, now });
     return {
-      ...screenInstrument(instrument, marketData, { horizon, now }),
+      ...screened,
       data_snapshot: {
         source: "twelve_data", interval: horizon === "week" ? "1day" : "15min",
         timestamp_timezone: horizon === "week" ? raw.meta?.exchange_timezone || null : "UTC", fetched_at: new Date(now).toISOString(),
         timestamp_kind: horizon === "week" ? "exchange_session_date" : "utc_instant",
-        validation: marketData.validation, bars,
+        validation: marketData.validation, bars, screening_selection: screened.screening_selection,
       },
     };
   });
