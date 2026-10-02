@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { assessSwingSetup } from "../src/strategyModel.js";
-import { createPaperObservation, settlePaperObservation, summarizePaperObservations, supportsPaperStrategyVersion, validatePaperObservation } from "../src/paperModel.js";
+import { PAPER_BASIS, createPaperObservation, paperObservationBasis, settlePaperObservation, summarizePaperObservations, supportsPaperStrategyVersion, validatePaperObservation } from "../src/paperModel.js";
 
 const monday = Date.parse("2026-09-28T21:00:00Z");
 const options = { setup: "BREAKOUT", holdingSessions: 3, quantity: 2, feePerOrder: 1, slippageBps: 10, recordedAt: monday };
@@ -42,12 +42,57 @@ test("captures a current WATCH once, freezes its signal inputs, and is JSON-vali
   assert.equal(paper.id, "paper:TEST-analysis-1:BREAKOUT");
   assert.equal(paper.signalDate, "2026-09-28");
   assert.equal(paper.signalBar.close, 149);
+  assert.equal(paper.basis, PAPER_BASIS.WITH_NEWS);
+  assert.equal(paper.sourceDecisionStatus, "WAIT");
   assert.ok(validatePaperObservation(paper));
   assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(paper))));
   assert.deepEqual(analysis, before);
   assert.deepEqual(createPaperObservation(analysis, options), paper);
   analysis.marketData.bars.at(-1).close = 999;
   assert.equal(paper.signalBar.close, 149);
+});
+
+test("a missing-news NO TRADE can be captured only as a distinct technical paper observation", () => {
+  const analysis = fixture();
+  analysis.news = null;
+  analysis.decision = { status: "NO_TRADE", reason_codes: ["UPSTREAM_ERROR", "NEWS_MISSING_OR_MISMATCHED"] };
+  assert.equal(paperObservationBasis(analysis), PAPER_BASIS.TECHNICAL_ONLY);
+  const record = createPaperObservation(analysis, options);
+  assert.equal(record.basis, PAPER_BASIS.TECHNICAL_ONLY);
+  assert.equal(record.sourceDecisionStatus, "NO_TRADE");
+  assert.ok(validatePaperObservation(record));
+  assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(record))));
+  assert.equal(validatePaperObservation({ ...record, basis: PAPER_BASIS.WITH_NEWS }), false);
+  assert.equal(validatePaperObservation({ ...record, sourceDecisionStatus: "WAIT" }), false);
+  const full = createPaperObservation({ ...fixture(), record: { trade_id: "TEST-analysis-2", signal_inputs: { record_type: "ANALYSIS" } } }, options);
+  const followup = later(analysis, day(tuesday, 149.7, 150.5, 149.5, 150), day(wednesday, 150.7, 151.5, 150.5, 151), day(thursday, 151.7, 152.5, 151.5, 152));
+  const closedTechnical = settlePaperObservation(record, followup, { now: closeTime(thursday) });
+  const closedFull = settlePaperObservation(full, followup, { now: closeTime(thursday) });
+  const summary = summarizePaperObservations([closedTechnical, closedFull]);
+  assert.equal(summary.closedCount, 2);
+  assert.deepEqual(summary.groups.map((group) => group.basis).sort(), [PAPER_BASIS.TECHNICAL_ONLY, PAPER_BASIS.WITH_NEWS].sort());
+});
+
+test("technical paper capture rejects other NO TRADE causes and remains backward compatible", () => {
+  for (const change of [
+    (a) => { a.decision.reason_codes.push("MARKET_DATA_INVALID"); },
+    (a) => { a.decision.reason_codes.push("NEWS_BEARISH"); },
+    (a) => { a.news = { ticker: "TEST", direction: "ner" }; },
+    (a) => { a.decision.reason_codes = ["UPSTREAM_ERROR"]; },
+    (a) => { a.strategy.status = "NO_SETUP"; },
+  ]) {
+    const analysis = fixture();
+    analysis.news = null;
+    analysis.decision = { status: "NO_TRADE", reason_codes: ["UPSTREAM_ERROR", "NEWS_MISSING_OR_MISMATCHED"] };
+    change(analysis);
+    assert.equal(paperObservationBasis(analysis), null);
+    assert.throws(() => createPaperObservation(analysis, options));
+  }
+  const legacy = createPaperObservation(fixture(), options);
+  legacy.version = "paper-forward-v0.1";
+  delete legacy.basis;
+  delete legacy.sourceDecisionStatus;
+  assert.ok(validatePaperObservation(legacy));
 });
 
 test("a captured v0.2 paper record remains a readable historical version after a future strategy bump", () => {

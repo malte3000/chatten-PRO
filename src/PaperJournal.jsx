@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPaperObservation, settlePaperObservation, summarizePaperObservations } from "./paperModel.js";
+import { PAPER_BASIS, createPaperObservation, paperObservationBasis, settlePaperObservation, summarizePaperObservations } from "./paperModel.js";
 import { PAPER_STORAGE_KEY, decodePaperLog, encodePaperLog, loadPaperLog, mergePaperLogs, updatePaperLog } from "./paperStorage.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
@@ -21,7 +21,9 @@ export default function PaperJournal({ latestAnalysis }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const importInput = useRef(null);
-  const candidate = latestAnalysis?.decision?.status === "WAIT" && latestAnalysis?.strategy?.status === "WATCH";
+  const basis = paperObservationBasis(latestAnalysis);
+  const candidate = basis !== null;
+  const technicalOnly = basis === PAPER_BASIS.TECHNICAL_ONLY;
   const plans = candidate ? latestAnalysis.strategy.plans : [];
   const selectedSetup = plans.some((plan) => plan.setup === setup) ? setup : plans[0]?.setup || "";
 
@@ -65,7 +67,9 @@ export default function PaperJournal({ latestAnalysis }) {
         return [...current, record];
       });
       setState({ records: next, storageError: "" });
-      setNotice("Bevakningskandidaten är låst och sparad lokalt. Den är ingen TRADE-signal eller genomförd affär.");
+      setNotice(technicalOnly
+        ? "Det tekniska upplägget är låst och sparat lokalt utan nyhetsanalys. Terminalens beslut är fortfarande NO TRADE; ingen affär har genomförts."
+        : "Bevakningskandidaten är låst och sparad lokalt. Den är ingen TRADE-signal eller genomförd affär.");
     } catch (problem) { setError(problem.message); }
   }
 
@@ -106,10 +110,11 @@ export default function PaperJournal({ latestAnalysis }) {
   const summary = summarizePaperObservations(state.records);
   return <section className="border border-slate-800 rounded-lg p-4 space-y-3" aria-label="Paperlogg">
     <h2 className="font-semibold">Paperlogg · experimentell</h2>
-    <p className="text-xs text-slate-400">Bevakningskandidater sparas bara i den här webbläsaren på denna preview-adress. De synkas inte mellan datorer eller till Supabase. Exportera en JSON-kopia för att flytta eller säkerhetskopiera loggen.</p>
+    <p className="text-xs text-slate-400">Paperobservationer sparas bara i den här webbläsaren på denna preview-adress. De synkas inte mellan datorer eller till Supabase. Exportera en JSON-kopia för att flytta eller säkerhetskopiera loggen.</p>
     <p className="text-xs text-amber-300">En paperobservation är en förhandslåst simulering, ingen TRADE-signal eller riktig order. Endast avslutade simuleringar får ett vinst- eller förlustutfall; NO TRADE räknas aldrig som vinst.</p>
     {candidate && <details className="border-t border-slate-800 pt-3">
-      <summary className="cursor-pointer text-cyan-300">Spara aktuell BEVAKA-kandidat lokalt</summary>
+      <summary className="cursor-pointer text-cyan-300">{technicalOnly ? "Spara tekniskt swingupplägg utan nyhetsanalys" : "Spara aktuell BEVAKA-kandidat lokalt"}</summary>
+      {technicalOnly && <p className="text-xs text-amber-300 mt-3">Nyhetsanalysen saknas. Helhetsbeslutet är NO TRADE. Detta är en separat teknisk paperobservation för att mäta upplägget, inte en godkänd signal eller order.</p>}
       <form className="grid gap-3 sm:grid-cols-2 mt-3 text-sm" onSubmit={saveCandidate}>
         <label>Upplägg<select className={`${CONTROL} block w-full mt-1`} value={selectedSetup} onChange={(event) => setSetup(event.target.value)}>{plans.map((plan) => <option value={plan.setup} key={plan.setup}>{plan.setup}</option>)}</select></label>
         <label>Max observerade sessioner<select className={`${CONTROL} block w-full mt-1`} value={holding} onChange={(event) => setHolding(event.target.value)}>{[1, 2, 3, 4, 5].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
@@ -129,15 +134,15 @@ export default function PaperJournal({ latestAnalysis }) {
     {notice && <p role="status" className="text-cyan-300 text-sm">{notice}</p>}
     <p className="text-sm">{summary.totalCount} observationer · {summary.closedCount} avslutade · {summary.pendingEntryCount + summary.pendingOpenCount} väntar/öppna · {summary.rejectedEntryCount} avvisade ingångar · {summary.notAssessedCount} utan bedömbara data.</p>
     {!state.records.length && <p className="text-sm text-slate-400">Inga paperobservationer ännu.</p>}
-    {(summary.groups || []).map((group) => <div className="border border-slate-800 rounded p-3 text-sm" key={JSON.stringify([group.strategyVersion, group.setup, group.currency])}>
-      <p className="font-medium">{group.strategyVersion} · {group.setup} · {group.currency}</p>
+    {(summary.groups || []).map((group) => <div className="border border-slate-800 rounded p-3 text-sm" key={JSON.stringify([group.strategyVersion, group.setup, group.currency, group.basis])}>
+      <p className="font-medium">{group.strategyVersion} · {group.setup} · {group.currency} · {group.basis === PAPER_BASIS.TECHNICAL_ONLY ? "endast teknik, nyheter saknades" : "med nyhetsanalys"}</p>
       <p className="mt-1">{group.closedCount} avslutade · {group.wins} vinster · {group.losses} förluster · vinstandel {formatted(group.winRatePercent)}{group.winRatePercent === null ? "" : "%"}</p>
       <p>Simulerat netto {formatted(group.totalNetPnl)} {group.currency} · avgifter {formatted(group.totalFees)} {group.currency} · medelutfall {formatted(group.expectancyR)}R.</p>
     </div>)}
     {state.records.length > 0 && <details className="border-t border-slate-800 pt-3 text-sm"><summary className="cursor-pointer text-cyan-300">Se paperobservationer</summary>
       <div className="divide-y divide-slate-800 mt-2">{[...state.records].reverse().slice(0, 20).map((record) => <article key={record.id} className="py-2">
         <p className="font-medium">{record.ticker} · {record.setup} · {LABELS[record.status] || record.status}</p>
-        <p className="text-xs text-slate-400">Signal {record.signalDate} · {record.strategyVersion} · {record.currency} · max {record.holdingSessions} sessioner</p>
+        <p className="text-xs text-slate-400">Signal {record.signalDate} · {record.strategyVersion} · {record.currency} · max {record.holdingSessions} sessioner · {record.basis === PAPER_BASIS.TECHNICAL_ONLY ? "endast teknik, NO TRADE" : "med nyhetsanalys"}</p>
         {record.status === "CLOSED" && <p>Simulerat netto {formatted(record.netPnl)} {record.currency} · {formatted(record.resultR)}R · utgång {record.exitDate}.</p>}
         {record.status === "NOT_ASSESSED" && <p className="text-xs text-amber-300">{record.assessmentError}</p>}
       </article>)}</div>
