@@ -80,7 +80,8 @@ Nyheter hämtas automatiskt för högst tre främsta tekniska kandidater.
 Negativa nyheter eller nyhetsfel ger NO TRADE i skannerns slutbedömning,
 men det tekniska upplägget visas fortfarande separat och kan öppnas i den
 samlade analysen. Sammanfattningen visar tekniska träffar och nyhetsfel var
-för sig. Andra kandidater märks som utan nyhetsanalys.
+för sig. Kandidater utanför de tre nyhetsanropen får också NO TRADE och
+märks som utan nyhetskontroll, men deras tekniska upplägg kan öppnas.
 En positiv nyhetsriktning utan faktiskt sökresultat eller citat nedgraderas
 till oklar. Visade sökkällor är länkar för kontroll, inte en verifiering av
 publiceringsdatum eller påståendenas relevans för den valda horisonten.

@@ -114,7 +114,12 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
           await pause(Math.max(0, Math.min(batch.wait_ms || 0, 120000)), abort.signal);
         }
       }
-      const shortlist = results.filter((item) => item.status === "WAIT").slice(0, 3);
+      const technicalMatches = results.filter((item) => item.status === "WAIT");
+      const shortlist = technicalMatches.slice(0, 3);
+      for (const item of technicalMatches.slice(3)) {
+        item.status = "NO_TRADE"; item.news_skipped = true;
+        item.reasons = [...item.reasons, "Nyhetsanalys gjordes inte för denna kandidat (högst tre per skanning)."];
+      }
       for (let index = 0; index < shortlist.length; index++) {
         const item = shortlist[index];
         setProgress(`Analyserar nyheter · ${index + 1}/${shortlist.length} kandidater…`);
@@ -159,6 +164,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
   const candidates = report?.results.filter((item) => item.status === "WAIT") || [];
   const technicalCandidates = report?.results.filter((item) => item.screening_status === "WAIT") || [];
   const newsErrors = technicalCandidates.filter((item) => item.news_error);
+  const newsSkipped = technicalCandidates.filter((item) => item.news_skipped);
   const rejected = report?.results.filter((item) => item.status === "NO_TRADE") || [];
   const unavailable = report?.results.filter((item) => item.status === "NOT_ASSESSED") || [];
   return <section className="border border-cyan-900 rounded-lg p-4 space-y-3" aria-label="Marknadsskanner">
@@ -187,7 +193,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
-      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {technicalCandidates.length} tekniska kandidater · {candidates.length} kvar som AVVAKTA{newsErrors.length > 0 ? ` · ${newsErrors.length} med nyhetsfel` : ""} · {rejected.length} NO TRADE · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
+      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {technicalCandidates.length} tekniska kandidater · {candidates.length} kvar som AVVAKTA{newsErrors.length > 0 ? ` · ${newsErrors.length} med nyhetsfel` : ""}{newsSkipped.length > 0 ? ` · ${newsSkipped.length} utan nyhetskontroll` : ""} · {rejected.length} NO TRADE · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
       {!busy && report.checked > 0 && !technicalCandidates.length && <p className="text-sm">{rejected.length === 0
         ? `EJ BEDÖMT · Ingen av de ${report.checked} kontrollerade aktierna kunde bedömas med tillgänglig prisdata.`
         : report.complete
@@ -198,7 +204,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
         {item.metrics?.price && <p className="text-xs text-slate-400">Senaste candlepris: {item.metrics.price.toFixed(2)} {item.currency} · {item.metrics.latest_datetime} {item.data_snapshot?.timestamp_kind === "exchange_session_date" || horizon === "week" ? "(sessionsdatum)" : "UTC"}</p>}
-        <p>{item.news_error ? `Tekniskt upplägg hittat, men nyhetsanalysen misslyckades: ${item.news_error}` : item.news?.summary || "Tekniska försöksfilter uppfyllda. Nyhetsanalys " + (busy ? "kan återstå." : "saknas för denna kandidat.")}</p>
+        <p>{item.news_error ? `Tekniskt upplägg hittat, men nyhetsanalysen misslyckades: ${item.news_error}` : item.news_skipped ? "Tekniskt upplägg hittat, men nyhetsanalys gjordes inte (högst tre per skanning)." : item.news?.summary || "Tekniska försöksfilter uppfyllda. Nyhetsanalys " + (busy ? "kan återstå." : "saknas för denna kandidat.")}</p>
         <NewsEvidence news={item.news} />
         <button className="border border-cyan-800 rounded px-3 py-2 disabled:opacity-40" disabled={busy} onClick={() => onAnalyze(item)}>Öppna samlad analys</button>
         <details><summary className="cursor-pointer text-cyan-300">Se mer – tester och nyheter</summary>
