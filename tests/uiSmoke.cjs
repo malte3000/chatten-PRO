@@ -46,6 +46,9 @@ function createMockApi() {
         validation: { valid: true }, bars, latest: bars.at(-1), price: bars.at(-1).close,
       } };
     }
+    if (pathname === "/api/market-status") return { status: 200, body: {
+      market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
+    } };
     if (pathname === "/api/analyze-news") {
       if (input.ticker === "FAIL") return { status: 502, body: { error: "Simulerat nyhetsfel" } };
       return { status: 200, body: {
@@ -201,10 +204,6 @@ async function runSmoke() {
     assert.equal(saved[0].trade_status, "CLOSED");
     assert.equal(saved[0].result_percent, 9);
     assert.equal(saved[0].result_r, 1.8);
-    await journal.getByText("Utfall i hämtad journal", { exact: true }).click();
-    await journal.getByText("Avslutade faktiska trades med giltigt utfall: 1.", { exact: true }).waitFor();
-    assert.equal(await journal.getByText("1,80 R", { exact: true }).isVisible(), true);
-
     await ticker.fill("AMD");
     assert.equal(await page.getByRole("region", { name: "Samlad analys" }).count(), 0);
     for (const failedTicker of ["FAIL", "FAILDATA"]) {
@@ -212,10 +211,18 @@ async function runSmoke() {
       await page.getByRole("button", { name: "Starta analys" }).click();
       await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
       assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
-      assert.equal(saved[0].signal_inputs.strategy.status, "NOT_ASSESSED");
-      assert.deepEqual(saved[0].signal_inputs.strategy.plans, []);
-      await page.getByRole("region", { name: "Samlad analys" }).getByText("EJ BEDÖMT", { exact: true }).waitFor();
+      assert.equal(saved[0].signal_inputs.strategy.status, failedTicker === "FAIL" ? "WATCH" : "NOT_ASSESSED");
+      if (failedTicker === "FAILDATA") {
+        assert.deepEqual(saved[0].signal_inputs.strategy.plans, []);
+        await page.getByRole("region", { name: "Samlad analys" }).getByText("EJ BEDÖMT", { exact: true }).waitFor();
+      } else {
+        assert.ok(saved[0].signal_inputs.strategy.plans.length > 0);
+        await page.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+      }
     }
+    await journal.getByText("Utfall i hämtad journal", { exact: true }).click();
+    await journal.getByText("Avslutade faktiska trades med giltigt utfall: 1.", { exact: true }).waitFor();
+    assert.equal(await journal.getByText("1,80 R", { exact: true }).isVisible(), true);
     assert.deepEqual(errors, []);
     console.log("Browser smoke passed: scanner, swing watch/risk calculation, actual trade save/close, details, ticker invalidation, mobile layout, missing-provider and unavailable Swedish scan regressions.");
   } finally { await browser.close(); }

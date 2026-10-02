@@ -196,6 +196,9 @@ export default function App() {
         request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal }),
         post("/api/analyze-news", { ticker: currentTicker, companyName: override?.name, exchange: currentExchange, horizonText, market }),
         !override && image ? post("/api/analyze-image", { ticker: currentTicker, imageBase64: image.base64, imageMediaType: image.type, market }) : Promise.resolve(null),
+        horizon === "week" && ["usa", "stockholm"].includes(market)
+          ? request(`/api/market-status?market=${encodeURIComponent(market)}`, { signal: abort.signal })
+          : Promise.resolve(null),
       ]);
       if (version !== revision.current) return;
       const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
@@ -203,7 +206,7 @@ export default function App() {
       const analysis = {
         ticker: currentTicker, horizon: horizonText, market,
         marketData: values[0], news: values[1], chart: values[2],
-        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[1]?.marketStatus }) : null,
+        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[1]?.marketStatus || values[3] }) : null,
       };
       analysis.decision = evaluateReadiness({ ...analysis, errors });
       if (responses[2].status === "rejected") analysis.chartError = responses[2].reason.message;
