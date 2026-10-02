@@ -64,12 +64,14 @@ skanning.
 
 Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
-Försöksfilter: pris > EMA20 > EMA50, positivt fem-candle-momentum, RVOL >= 1,
+Gemensamma försöksfilter är pris > EMA20 > EMA50, positivt fem-candle-momentum,
 ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
-För daytrade gäller omsättningen per 15-minuterscandle, inte per dag.
-RVOL jämför senaste candle med föregående 20 candles; inte samma klockslag
-andra dagar. I swingläge används bara färdigställda dagskurser enligt vald
-börs klocka; en pågående dagskurs räknas inte in i försöksfiltren.
+Swing (`v0.4-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
+EMA20 eller ett utbrott över föregående 20 dagars högsta med minst 1,2 gånger
+medianvolymen. Pullback kräver inte förhöjd dagsvolym. Bara färdigställda
+dagskurser enligt börsens klocka används. Daytrade kräver RVOL >= 1 och
+omsättningen gäller per 15-minuterscandle. RVOL jämför senaste candle med
+föregående 20 candles, inte samma klockslag andra dagar.
 I daytradeläge kan senaste 15-minuterscandle vara ofullständig. Dessa
 startregler är inte backtestade och kan missa bra lägen. Filterpoäng 0–4 är
 aldrig vinstsannolikhet.
@@ -99,6 +101,9 @@ serverminnet är best-effort per varm instans, inte en global begränsning mella
 Vercel-instanser eller andra API-anrop. Kör inte samtidiga skanningar innan en
 distribuerad kvot/jobbtjänst finns. Start sker endast vid klick, ingen bakgrunds-
 automation. Browser måste vara öppen; Stoppa bevarar en ofullständig rapport.
+Den inloggningsskyddade knappen **Visa API-krediter** läser Twelve Datas
+`/api_usage` vid klick och visar minutens användning samt dagskvoten när
+leverantören skickar den. Varje sådan kontroll kostar själv en API-kredit.
 
 En rapport sparas via befintlig `/api/trades` med `record_type=SCAN` i
 `signal_inputs`, syntetisk ticker SCAN-USA/SCAN-SE och inga tradeutfall.
@@ -112,9 +117,8 @@ Publik OMX/XSTO-listning ger inte prisdatatäckning. Twelve Datas
 listar XSTO bland börser som kräver separat licens eller saknar EOD-data, och
 [XSTO-sidan](https://twelvedata.com/exchanges/xsto) visar referensdata men inga
 Core price-endpoints. Därför kan Sverige inte användas för denna skanner utan
-verifierat stöd för samma börs och intervall hos datakällan. Kontots specifika
-behörighet, livekvot och live-Supabase är inte verifierade. Tester använder
-simulerade svar.
+verifierat stöd för samma börs och intervall hos datakällan. Live-Supabase är
+inte verifierad. Tester använder simulerade svar.
 
 Providerreferenser: [instrumentlistor](https://support.twelvedata.com/en/articles/5620513-how-to-find-all-available-symbols-at-twelve-data),
 [batch och krediter](https://support.twelvedata.com/en/articles/5203360-batch-api-requests).
