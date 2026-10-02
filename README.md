@@ -77,8 +77,13 @@ startregler är inte backtestade och kan missa bra lägen. Filterpoäng 0–4 ä
 aldrig vinstsannolikhet.
 
 Nyheter hämtas automatiskt för högst tre främsta tekniska kandidater.
-Negativa nyheter eller nyhetsfel blockerar kandidaten. Andra kandidater
-märks som utan nyhetsanalys och kan öppnas i den samlade analysen.
+Negativa nyheter eller nyhetsfel ger NO TRADE i skannerns slutbedömning,
+men det tekniska upplägget visas fortfarande separat och kan öppnas i den
+samlade analysen. Sammanfattningen visar tekniska träffar och nyhetsfel var
+för sig. Andra kandidater märks som utan nyhetsanalys.
+En positiv nyhetsriktning utan faktiskt sökresultat eller citat nedgraderas
+till oklar. Visade sökkällor är länkar för kontroll, inte en verifiering av
+publiceringsdatum eller påståendenas relevans för den valda horisonten.
 Alla positiva kandidater stannar på AVVAKTA tills Risk Engine och tester finns.
 Uppenbara hävstångsprodukter filtreras bort även när aktielistan felaktigt märker
 dem som Common Stock. Produktklassningen är ännu inte fullständigt verifierad;
@@ -197,6 +202,10 @@ krävs fortfarande före TRADE.
 ## Paperlogg för framtida utfall (experimentell)
 
 En BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal paperobservation.
+Om endast nyhets-API:t fallerar kan ett tekniskt BEVAKA-upplägg sparas som
+en separat paperobservation märkt **endast teknik** medan helhetsbeslutet
+förblir NO TRADE. Resultaten hålls åtskilda från observationer med
+nyhetsanalys; det öppnar inte för en riktig TRADE-signal.
 Signalens datum, strategi, prisnivåer och uttryckliga antaganden om antal,
 avgifter, slippage och max innehavstid låses innan senare dagskurser finns.
 När samma aktie analyseras på nytt kontrolleras nya färdigställda dagskurser
