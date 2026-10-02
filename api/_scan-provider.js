@@ -30,7 +30,8 @@ function isClearlyUnsupportedProduct(item) {
   const name = String(item.name || "").toUpperCase();
   return /^(?:BULL|BEAR|MINI|TURBO)(?:[.\s-]|$)/.test(symbol) ||
     /\.AVA\./.test(symbol) ||
-    /\b(?:WARRANT|CERTIFICATE|MINI FUTURE|TURBO|BULL CERTIFICATE|BEAR CERTIFICATE)\b/.test(name);
+    /\.(?:WT|WTS|WS)(?:\.[A-Z])?$/.test(symbol) ||
+    /\b(?:WARRANTS?|CERTIFICATES?|MINI FUTURE|TURBO|BULL CERTIFICATE|BEAR CERTIFICATE)\b/.test(name);
 }
 
 export async function getUniverse(market, now = Date.now()) {

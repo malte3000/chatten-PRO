@@ -35,13 +35,18 @@ test("scanner selects provider instruments, excludes unsupported products and th
     if (request.pathname === "/stocks") {
       assert.equal(request.searchParams.get("country"), "United States");
       return { ok: true, json: async () => ({ data: [
-        { symbol: "NVDA", exchange: "NASDAQ", country: "United States", currency: "USD", type: "Common Stock" },
+        { symbol: "BRK.B", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock" },
+        { symbol: "AAC.WT", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock", name: "Ares Acquisition Corporation Re" },
+        { symbol: "MOCK.WS", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock" },
+        { symbol: "MOCK.WTS", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock" },
+        { symbol: "MOCK.WS.A", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock" },
+        { symbol: "NAMED", exchange: "NYSE", country: "United States", currency: "USD", type: "Common Stock", name: "Named Warrants" },
         { symbol: "CERT", exchange: "NASDAQ", country: "United States", currency: "USD", type: "Structured Product" },
         { symbol: "OTC", exchange: "OTC", country: "United States", currency: "USD", type: "Common Stock" },
       ] }) };
     }
     timeCalls++;
-    assert.equal(request.searchParams.get("symbol"), "NVDA:NASDAQ");
+    assert.equal(request.searchParams.get("symbol"), "BRK.B:NYSE");
     assert.equal(request.searchParams.get("timezone"), "UTC");
     assert.equal(request.searchParams.get("apikey"), "test-only-key");
     return { ok: true, json: async () => ({ meta: { symbol: "AMD", exchange: "NASDAQ", currency: "USD" }, values: [] }) };
