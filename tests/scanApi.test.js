@@ -74,7 +74,7 @@ test("Swedish scan excludes obvious products and separates valid candidates from
     assert.deepEqual(new Set(request.searchParams.get("symbol").split(",")), new Set(["DEMO:OMX", "OTHER:OMX"]));
     const values = Array.from({ length: 100 }, (_, index) => {
       const close = 50 + index;
-      return { datetime: new Date(clock - (100 - index) * 86400000).toISOString().slice(0, 10), open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(close), volume: index === 99 ? "2000000" : "1000000" };
+      return { datetime: new Date(clock - (100 - index) * 86400000).toISOString().slice(0, 10), open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(index === 99 ? close + 0.5 : close), volume: index === 99 ? "2000000" : "1000000" };
     }).reverse();
     return { ok: true, json: async () => ({
       "DEMO:OMX": { meta: { symbol: "DEMO", exchange: "OMX", currency: "SEK", exchange_timezone: "Europe/Stockholm" }, values },
@@ -88,6 +88,7 @@ test("Swedish scan excludes obvious products and separates valid candidates from
   const candidate = res.data.results.find((item) => item.symbol === "DEMO");
   const unavailable = res.data.results.find((item) => item.symbol === "OTHER");
   assert.equal(candidate.status, "WAIT");
+  assert.deepEqual(candidate.screening_setups, ["BREAKOUT"]);
   assert.equal(candidate.metrics.rvol, 2);
   assert.equal(candidate.metrics.atr, 2);
   assert.equal(candidate.currency, "SEK");

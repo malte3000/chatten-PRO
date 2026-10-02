@@ -202,7 +202,9 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         </details>
       </article>)}
       <details className="border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-cyan-300">Se mer – alla {report.results.length} instrument och bedömningar</summary>
-        <p className="text-xs text-slate-400 mt-2">Försöksfilter: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent, tillräcklig candle-omsättning. {horizon === "week" ? "Swing använder bara färdigställda dagskurser." : "Senaste 15-minuterscandle kan vara ofullständig."} Ingen validerad edge eller uppmätt träffsäkerhet.</p>
+        <p className="text-xs text-slate-400 mt-2">{horizon === "week"
+          ? "Försöksfilter för swing: pris över EMA20 över EMA50, positivt femdagarsmomentum och antingen rekyl mot EMA20 eller utbrott över 20-dagars högsta med minst 1,2 gånger medianvolymen. ATR 0,2–8 procent och tillräcklig omsättning krävs. Bara färdigställda dagskurser används."
+          : "Försöksfilter för daytrade: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent och tillräcklig candle-omsättning. Senaste 15-minuterscandle kan vara ofullständig."} Ingen validerad edge eller uppmätt träffsäkerhet.</p>
         {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong className={item.status === "NOT_ASSESSED" ? "text-amber-300" : undefined}>{item.symbol} · {item.exchange} · {LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
       </details>
       <p role="status" className="text-xs text-slate-400">{saveState === "saved" ? "Skanningsrapporten är sparad i journalen, separat från faktiska trades." : saveState === "saving" ? "Sparar skanningsrapport…" : saveState === "read_only" ? "Skanningsresultatet visas här, men previewns gemensamma journal är skrivskyddad. En BEVAKA-kandidat kan sparas separat i den lokala paperloggen efter samlad analys." : "Skanningen är inte sparad."}</p>

@@ -2,7 +2,7 @@ import { validateMarketBars } from "../api/_market-data-validation.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 
-export const SCREEN_VERSION = "v0.3-experimental";
+export const SCREEN_VERSION = "v0.4-experimental";
 
 export function ema(values, period) {
   if (values.length < period) return null;
@@ -14,7 +14,7 @@ export function ema(values, period) {
 
 export function screenInstrument(instrument, marketData, { horizon = "week", market = null, now = Date.now() } = {}) {
   const reasons = [];
-  const base = { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null, data_issue: null };
+  const base = { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null, screening_setups: [], data_issue: null };
   const unavailable = (code, reason) => { base.data_issue = code; reasons.push(reason); return base; };
   const sourceBars = marketData?.bars;
   if (marketData?.ticker !== instrument.symbol) return unavailable("INSTRUMENT_MISMATCH", "Kursdatan matchar inte den valda aktien.");
@@ -62,25 +62,45 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
   const baseline = bars.slice(-21, -1);
   const avgVolume = baseline.reduce((sum, bar) => sum + bar.volume, 0) / baseline.length;
   const rvol = bars.at(-1).volume / avgVolume;
+  const sortedBaselineVolumes = baseline.map((bar) => bar.volume).sort((a, b) => a - b);
+  const medianVolume = (sortedBaselineVolumes[9] + sortedBaselineVolumes[10]) / 2;
+  const volumeVsMedian = bars.at(-1).volume / medianVolume;
+  const priorHigh = Math.max(...baseline.map((bar) => bar.high));
   const turnover = baseline.reduce((sum, bar) => sum + bar.close * bar.volume, 0) / baseline.length;
   const momentumPct = (price / closes.at(-6) - 1) * 100;
   const atrPct = atr / price * 100;
   const minimumTurnover = instrument.currency === "USD" ? 1e6 : instrument.currency === "SEK" ? 1e7 : null;
-  if (![price, ema20, ema50, atr, avgVolume, rvol, turnover, momentumPct, atrPct].every(Number.isFinite) || avgVolume <= 0) {
+  if (![price, ema20, ema50, atr, avgVolume, medianVolume, rvol, volumeVsMedian, priorHigh, turnover, momentumPct, atrPct].every(Number.isFinite) || avgVolume <= 0 || medianVolume <= 0) {
     return unavailable("INVALID_INDICATORS", "Pris- eller volymdata gav ogiltiga indikatorer.");
   }
   base.metrics = { price, ema20, ema50, atr, atr_pct: atrPct, rvol, momentum_pct: momentumPct, average_bar_turnover: turnover, latest_datetime: bars.at(-1).datetime };
+  if (horizon === "week") Object.assign(base.metrics, { prior_20_day_high: priorHigh, volume_vs_prior_median: volumeVsMedian });
   base.status = "NO_TRADE";
   if (minimumTurnover === null || turnover < minimumTurnover) reasons.push("För låg omsättning eller ej stödd valuta.");
   if (atrPct < 0.2 || atrPct > 8) reasons.push("Volatilitet utanför skannerns försöksintervall.");
   if (!(price > ema20 && ema20 > ema50)) reasons.push("Ingen tydlig positiv EMA-trend.");
   if (momentumPct <= 0) reasons.push("Momentum är inte positivt.");
-  if (rvol < 1) reasons.push("Senaste candle har inte förhöjd volym.");
+  const swingSetups = [];
+  if (horizon === "week") {
+    // Match the experiment's completed-candle swing setups: a pullback does not
+    // require elevated volume, while a breakout uses the prior median volume.
+    const positiveTrend = price > ema20 && ema20 > ema50 && momentumPct > 0;
+    const pullback = positiveTrend && bars.at(-1).low <= ema20 + 0.2 * atr && bars.at(-1).low >= ema20 - 0.8 * atr && price > ema20;
+    const breakout = positiveTrend && price > priorHigh && volumeVsMedian >= 1.2;
+    if (pullback) swingSetups.push("PULLBACK");
+    if (breakout) swingSetups.push("BREAKOUT");
+    if (positiveTrend && !swingSetups.length) reasons.push("Varken rekyl mot EMA20 eller 20-dagars utbrott med volym bekräftades.");
+  } else if (rvol < 1) {
+    reasons.push("Senaste candle har inte förhöjd volym.");
+  }
   if (reasons.length) return base;
   base.status = "WAIT";
+  base.screening_setups = swingSetups;
   // Filter/ranking strength is NOT a probability. All rules are experimental.
   base.rank_score = (rvol >= 1.5 ? 2 : 1) + (momentumPct >= 1 ? 2 : 1);
-  base.reasons = ["Positiv trend, momentum och volym klarar försöksfiltren.", "Endast analyskandidat. Risk Engine och strategivalidering saknas."];
+  base.reasons = horizon === "week"
+    ? ["Positiv trend och momentum samt experimentellt swingupplägg: " + base.screening_setups.join(" + ") + ".", "Endast analyskandidat. Risk Engine och strategivalidering saknas."]
+    : ["Positiv trend, momentum och volym klarar försöksfiltren.", "Endast analyskandidat. Risk Engine och strategivalidering saknas."];
   return base;
 }
 
