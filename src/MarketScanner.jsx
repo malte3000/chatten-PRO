@@ -26,6 +26,9 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
   const [error, setError] = useState("");
   const [saveState, setSaveState] = useState("idle");
   const [record, setRecord] = useState(null);
+  const [creditUsage, setCreditUsage] = useState(null);
+  const [creditUsageBusy, setCreditUsageBusy] = useState(false);
+  const [creditUsageError, setCreditUsageError] = useState("");
   const revision = useRef(0);
   const controller = useRef(null);
 
@@ -49,6 +52,24 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         if (problem.code === "PREVIEW_READ_ONLY") setSaveState("read_only");
         else { setSaveState("failed"); setError(`Skanningen kunde inte sparas: ${problem.message}`); }
       }
+    }
+  }
+
+  async function showCreditUsage() {
+    if (creditUsageBusy) return;
+    setCreditUsageBusy(true);
+    setCreditUsageError("");
+    try {
+      const usage = await fetchJson("/api/credit-usage", { method: "GET", cache: "no-store" });
+      if (!Number.isSafeInteger(usage.current_usage) || !Number.isSafeInteger(usage.plan_limit)) {
+        throw new Error("Twelve Data returnerade inte läsbara kreditvärden.");
+      }
+      setCreditUsage(usage);
+    } catch (problem) {
+      setCreditUsage(null);
+      setCreditUsageError(problem.message);
+    } finally {
+      setCreditUsageBusy(false);
     }
   }
 
@@ -144,7 +165,15 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
       </label>
       <button className="rounded bg-cyan-300 text-slate-950 px-5 py-3 font-semibold disabled:opacity-40" disabled={busy || market === "off"} onClick={start}>{busy ? "Skannar…" : "Skanna marknaden"}</button>
       {busy && <button className="border border-slate-700 rounded px-3 py-2" onClick={() => controller.current?.abort()}>Stoppa</button>}
+      <button className="border border-cyan-800 rounded px-3 py-2 text-sm text-cyan-300 disabled:opacity-40" disabled={busy || creditUsageBusy} onClick={showCreditUsage}>{creditUsageBusy ? "Läser krediter…" : "Visa API-krediter"}</button>
     </div>
+    <p className="text-xs text-slate-400">Kreditkontrollen görs bara när du klickar och kostar själv 1 Twelve Data-kredit.</p>
+    {creditUsage && <div role="status" className="text-sm text-slate-200">
+      <p>Twelve Data: {creditUsage.current_usage} av {creditUsage.plan_limit} API-krediter använda under aktuell minut.</p>
+      {Number.isSafeInteger(creditUsage.daily_usage) && Number.isSafeInteger(creditUsage.plan_daily_limit) && <p>{creditUsage.daily_usage} av {creditUsage.plan_daily_limit} använda under aktuell UTC-dag.</p>}
+      <p className="text-xs text-slate-400">Avläst {creditUsage.fetched_at ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", dateStyle: "short", timeStyle: "medium" }).format(new Date(creditUsage.fetched_at)) : "just nu"} (svensk tid).</p>
+    </div>}
+    {creditUsageError && <p role="alert" className="text-sm text-amber-300">Kunde inte visa API-krediter: {creditUsageError}</p>}
     <p className="text-xs text-slate-400">Automatiskt urval av stödda aktier, inte hela börsen. Ett nytt klick samma UTC-dag ger normalt samma aktier; en större budget utökar urvalet. Skanningen kan ta flera minuter på grund av API-kvoten. Nyheter hämtas för högst tre kandidater.</p>
     {market === "off" && <p className="text-sm text-amber-300">Välj USA eller Sverige för att ange vilken marknad som ska skannas. Av finns kvar för manuell analys.</p>}
     <p className="text-xs text-slate-400">Skannern försöker utesluta warranter och certifikat, men datakällans produktklassning behöver verifieras. Separat produktdata och riskkontroll krävs för dem.</p>
@@ -159,7 +188,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         : report.complete
           ? `NO TRADE för de ${rejected.length} bedömda aktierna i det här urvalet. Ingen blev analyskandidat.`
           : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${rejected.length} bedömda aktierna.`}
-        {unavailable.length > 0 && rejected.length > 0 && ` ${unavailable.length} aktier kunde inte bedömas eftersom kursdata inte kunde verifieras.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
+        {unavailable.length > 0 && rejected.length > 0 && ` ${unavailable.length} ${unavailable.length === 1 ? "aktie" : "aktier"} kunde inte bedömas eftersom kursdata inte kunde verifieras.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
       {candidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
