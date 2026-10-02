@@ -65,7 +65,7 @@ test("market data translates a provider timeout into a clear gateway timeout", a
   assert.match(res.data.message, /15 sekunder/);
 });
 
-test("news runs for a closed market and never treats AI confidence as probability", async (t) => {
+test("news without actual search evidence remains unclear even when the model claims a direction", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-19T12:00:00Z") });
   const headers = setup(t);
   globalThis.fetch = async (_url, options) => {
@@ -77,9 +77,49 @@ test("news runs for a closed market and never treats AI confidence as probabilit
   await newsHandler({ method: "POST", headers, body: { ticker: " nvda ", market: "stockholm", horizonText: "1–5 handelsdagar" } }, res);
   assert.equal(res.code, 200);
   assert.equal(res.data.ticker, "NVDA");
-  assert.equal(res.data.direction_confidence, 30);
+  assert.equal(res.data.direction, "oklart");
+  assert.equal(res.data.direction_confidence, 0);
   assert.equal(res.data.probability_up, null);
   assert.equal(res.data.marketStatus.isOpen, false);
+  assert.deepEqual(res.data.source_evidence.sources, []);
+  assert.equal(res.data.source_evidence.freshness_verified, false);
+  assert.deepEqual(res.data.key_news, []);
+});
+
+test("actual Anthropic web results and citations are surfaced without claiming event freshness", async (t) => {
+  const headers = setup(t);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({
+    stop_reason: "end_turn", content: [
+      { type: "server_tool_use", name: "web_search", input: { query: "NVDA news" } },
+      { type: "web_search_tool_result", content: [
+        { type: "web_search_result", url: "https://example.com/article", title: "Issuer update", page_age: "October 2, 2026" },
+        { type: "web_search_result", url: "javascript:alert(1)", title: "Unsafe URL" },
+      ] },
+      { type: "text", text: JSON.stringify(analysis), citations: [
+        { type: "web_search_result_location", url: "https://example.com/article", title: "Issuer update" },
+      ] },
+    ],
+  }) });
+  const res = response();
+  await newsHandler({ method: "POST", headers, body: { ticker: "NVDA" } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.data.direction, "upp");
+  assert.equal(res.data.direction_confidence, 30);
+  assert.deepEqual(res.data.source_evidence.sources, [
+    { url: "https://example.com/article", title: "Issuer update", kind: "citation" },
+  ]);
+  assert.equal(res.data.source_evidence.freshness_verified, false);
+  assert.equal(Object.hasOwn(res.data.source_evidence.sources[0], "page_age"), false);
+});
+
+test("Anthropic billing failures remain errors, never neutral news", async (t) => {
+  const headers = setup(t);
+  globalThis.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { message: "Your credit balance is too low to access the Anthropic API." } }) });
+  const res = response();
+  await newsHandler({ method: "POST", headers, body: { ticker: "PAYC" } }, res);
+  assert.equal(res.code, 400);
+  assert.match(res.data.message, /credit balance is too low/);
+  assert.equal(res.data.direction, undefined);
 });
 
 test("paused, truncated, or invalid news is rejected", async (t) => {

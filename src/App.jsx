@@ -7,6 +7,7 @@ import MarketScanner from "./MarketScanner.jsx";
 import PerformanceSummary from "./PerformanceSummary.jsx";
 import HistoricalReplay from "./HistoricalReplay.jsx";
 import PaperJournal from "./PaperJournal.jsx";
+import NewsEvidence from "./NewsEvidence.jsx";
 
 const LABELS = { TRADE: "TRADE", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
@@ -284,6 +285,7 @@ export default function App() {
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
         </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
+        <NewsEvidence news={result.news} />
         <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad. Paperloggen sparas separat i webbläsaren." : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
         <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { rankCandidates, SCREEN_VERSION } from "./screening.js";
 import { fetchJson } from "./apiClient.js";
+import NewsEvidence from "./NewsEvidence.jsx";
 
 const LABELS = { WAIT: "AVVAKTA", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT · KURSDATA EJ VERIFIERAD" };
 
@@ -194,6 +195,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
         {item.metrics?.price && <p className="text-xs text-slate-400">Senaste candlepris: {item.metrics.price.toFixed(2)} {item.currency} · {item.metrics.latest_datetime} {item.data_snapshot?.timestamp_kind === "exchange_session_date" || horizon === "week" ? "(sessionsdatum)" : "UTC"}</p>}
         <p>{item.news?.summary || "Tekniska försöksfilter uppfyllda. Nyhetsanalys " + (busy ? "kan återstå." : "saknas för denna kandidat.")}</p>
+        <NewsEvidence news={item.news} />
         <button className="border border-cyan-800 rounded px-3 py-2 disabled:opacity-40" disabled={busy} onClick={() => onAnalyze(item)}>Öppna samlad analys</button>
         <details><summary className="cursor-pointer text-cyan-300">Se mer – tester och nyheter</summary>
           <ul className="list-disc pl-5 mt-2">{item.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>

@@ -2,6 +2,31 @@ import { isAuthenticated } from "./_auth.js";
 import { getMarketStatus } from "./_market-hours.js";
 import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
 
+function searchSources(content) {
+  const sources = new Map();
+  const add = (item, kind) => {
+    if (typeof item?.url !== "string") return;
+    let url;
+    try { url = new URL(item.url); } catch { return; }
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return;
+    const href = url.toString();
+    const title = typeof item.title === "string" && item.title.trim() ? item.title.trim().slice(0, 180) : url.hostname;
+    if (!sources.has(href)) sources.set(href, { url: href, title, kind });
+  };
+  // Citations refer to the model's answer; bare search results are only leads.
+  for (const block of content || []) {
+    if (block?.type === "text" && Array.isArray(block.citations)) {
+      for (const citation of block.citations) if (citation?.type === "web_search_result_location") add(citation, "citation");
+    }
+  }
+  for (const block of content || []) {
+    if (block?.type === "web_search_tool_result" && Array.isArray(block.content)) {
+      for (const result of block.content) if (result?.type === "web_search_result") add(result, "search_result");
+    }
+  }
+  return [...sources.values()].slice(0, 5);
+}
+
 export default async function handler(req, res) {
    if (!isAuthenticated(req)) {
     return res.status(401).json({
@@ -173,7 +198,18 @@ Skriv all text på svenska.
       return res.status(502).json({ error: "Nyhetsanalysens format är ogiltigt. Ingen signal skapades." });
     }
 
-    return res.status(200).json({ ...analysis, ticker: ticker.trim().toUpperCase(), probability_up: null, marketStatus });
+    const sources = searchSources(data.content);
+    const unsupportedDirection = sources.length === 0 && analysis.direction !== "oklart";
+    return res.status(200).json({
+      ...analysis,
+      direction: unsupportedDirection ? "oklart" : analysis.direction,
+      direction_confidence: unsupportedDirection ? 0 : analysis.direction_confidence,
+      summary: unsupportedDirection ? "Nyhetsriktningen är oklar eftersom sökresultat och citerade källor saknas." : analysis.summary,
+      key_news: unsupportedDirection ? [] : analysis.key_news,
+      reasoning: unsupportedDirection ? "Modellens riktningspåstående används inte utan ett faktiskt sökresultat eller citat." : analysis.reasoning,
+      ticker: ticker.trim().toUpperCase(), probability_up: null, marketStatus,
+      source_evidence: { sources, freshness_verified: false, searched_at: new Date().toISOString() },
+    });
   } catch (error) {
     console.error(error);
 
