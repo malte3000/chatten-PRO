@@ -112,11 +112,13 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [saveState, setSaveState] = useState("idle");
+  const [newsLoading, setNewsLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const revision = useRef(0);
   const controller = useRef(null);
+  const newsController = useRef(null);
   const fileInput = useRef(null);
   const historyRevision = useRef(0);
 
@@ -136,12 +138,12 @@ export default function App() {
 
   useEffect(() => {
     void refreshHistory();
-    return () => { controller.current?.abort(); revision.current++; historyRevision.current++; };
+    return () => { controller.current?.abort(); newsController.current?.abort(); revision.current++; historyRevision.current++; };
   }, []);
 
   function invalidate() {
-    revision.current++; controller.current?.abort();
-    setBusy(false); setResult(null); setSaveState("idle"); setNotice("");
+    revision.current++; controller.current?.abort(); newsController.current?.abort();
+    setBusy(false); setNewsLoading(false); setResult(null); setSaveState("idle"); setNotice("");
   }
 
   function changeTicker(value) {
@@ -195,7 +197,6 @@ export default function App() {
     try {
       const responses = await Promise.allSettled([
         request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal }),
-        post("/api/analyze-news", { ticker: currentTicker, companyName: override?.name, exchange: currentExchange, horizonText, market }),
         !override && image ? post("/api/analyze-image", { ticker: currentTicker, imageBase64: image.base64, imageMediaType: image.type, market }) : Promise.resolve(null),
         horizon === "week" && ["usa", "stockholm"].includes(market)
           ? request(`/api/market-status?market=${encodeURIComponent(market)}`, { signal: abort.signal })
@@ -203,20 +204,41 @@ export default function App() {
       ]);
       if (version !== revision.current) return;
       const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
-      const errors = responses.slice(0, 2).flatMap((response, index) => response.status === "rejected" ? [`${index === 0 ? "Marknadsdata" : "Nyheter"}: ${response.reason.message}`] : []);
+      const errors = responses[0].status === "rejected" ? [`Marknadsdata: ${responses[0].reason.message}`] : [];
       const analysis = {
-        ticker: currentTicker, horizon: horizonText, market,
-        marketData: values[0], news: values[1], chart: values[2],
-        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[1]?.marketStatus || values[3] }) : null,
+        ticker: currentTicker, companyName: override?.name || null, horizon: horizonText, market,
+        marketData: values[0], news: null, chart: values[1],
+        newsRequested: false, newsError: null,
+        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[2] }) : null,
       };
       analysis.decision = evaluateReadiness({ ...analysis, errors });
-      if (responses[2].status === "rejected") analysis.chartError = responses[2].reason.message;
+      if (responses[1].status === "rejected") analysis.chartError = responses[1].reason.message;
       const snapshot = { ...analysis, version, record: createAnalysisRecord(analysis) };
       setResult(snapshot); await persist(snapshot);
     } catch (error) {
       if (version === revision.current) setNotice(`Analysen misslyckades. Ingen trade godkändes: ${error.message}`);
     } finally {
       if (version === revision.current) setBusy(false);
+    }
+  }
+
+  async function loadOptionalNews(snapshot) {
+    if (!snapshot || newsLoading) return;
+    newsController.current?.abort();
+    const abort = new AbortController(); newsController.current = abort;
+    const version = snapshot.version;
+    setNewsLoading(true);
+    setResult((current) => current?.version === version ? { ...current, newsRequested: true, newsError: null } : current);
+    try {
+      const news = await request("/api/analyze-news", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
+        body: JSON.stringify({ ticker: snapshot.ticker, companyName: snapshot.companyName, exchange: snapshot.marketData?.exchange, horizonText: snapshot.horizon, market: snapshot.market }),
+      });
+      if (version === revision.current) setResult((current) => current?.version === version ? { ...current, news, newsError: null } : current);
+    } catch (error) {
+      if (version === revision.current) setResult((current) => current?.version === version ? { ...current, news: null, newsError: error.message } : current);
+    } finally {
+      if (version === revision.current) setNewsLoading(false);
     }
   }
 
@@ -258,7 +280,6 @@ export default function App() {
           </label>
         </div>
         {mode === "analysis" && <button className="rounded bg-cyan-300 text-slate-950 px-5 py-3 font-semibold disabled:opacity-40" disabled={busy || !normalizeTicker(ticker) || Boolean(image && !image.confirmed)} onClick={() => start()}>{busy ? "Hämtar data och analyserar…" : "Starta analys"}</button>}
-        <p className="text-xs text-slate-400">Nyheter hämtas även när börsen är stängd.</p>
         {market === "off" && <p className="text-xs text-amber-300">Marknadskontrollen är av för analysen. Detta ändrar inte datakällans börs och kringgår inte riskregler eller TRADE-spärren.</p>}
         {mode === "analysis" && <Details title="valfri graf">
           <p>Tickern måste vara korrekt. En uppladdad bild bevisar inte vilket instrument den visar.</p>
@@ -285,12 +306,16 @@ export default function App() {
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
         </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
+        {result.newsError && <p role="status" className="text-sm mt-3 text-amber-300">Valfria nyheter kunde inte hämtas: {result.newsError}. Det tekniska beslutet påverkas inte.</p>}
+        {(!result.news || result.newsError) && <button className={`${CONTROL} mt-3 disabled:opacity-40`} disabled={newsLoading} onClick={() => loadOptionalNews(result)}>{newsLoading ? "Hämtar valfri nyhetsbakgrund…" : result.newsError ? "Försök hämta nyhetsbakgrund igen" : "Hämta valfri nyhetsbakgrund"}</button>}
+        <p className="text-xs text-slate-400 mt-2">Nyhetsbakgrunden hämtas separat efter beslutet och sparas inte i journalposten.</p>
         <NewsEvidence news={result.news} />
         <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad. Paperloggen sparas separat i webbläsaren." : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
         <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />
         <Details title="nyheter, graf och data">
-          <h3 className="font-semibold">Nyhetsanalys</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || "Nyhetsanalys saknas."}</p>
+          <h3 className="font-semibold">Nyheter · valfri bakgrund</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || (newsLoading ? "Nyheter hämtas separat…" : result.newsRequested ? "Nyhetsanalysen kunde inte hämtas." : "Nyheter hämtades inte för den här analysen.")}</p>
+          <p className="text-xs text-slate-400">Nyhetsinformationen påverkar inte AVVAKTA/NO TRADE och är inte en validerad handelssignal.</p>
           {result.news?.magnitude_note && <p>{result.news.magnitude_note}</p>}
           <ul className="list-disc pl-5">{result.news?.key_news?.map((item, index) => <li key={index}>[{item.impact}] {item.headline}</li>)}</ul>
           <p className="text-xs text-slate-400">AI:ns riktningssäkerhet: {result.news?.direction_confidence ?? "saknas"}. Detta är inte uppmätt träffsäkerhet eller sannolikhet för vinst.</p>

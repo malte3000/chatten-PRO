@@ -130,7 +130,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
             ticker: market === "usa" ? "SCAN-USA" : "SCAN-SE", timestamp: new Date().toISOString(),
             signal: "NO_TRADE", direction: "NONE", confidence: 0, trade_status: "NO_TRADE",
             risk_engine_status: "NOT_EVALUATED", winner: null, result_percent: null,
-            signal_inputs: { record_type: "SCAN", market, horizon, ...final, scan_status: scanStatus, probability_calibrated: false },
+            signal_inputs: { record_type: "SCAN", market, horizon, ...final, scan_status: scanStatus, scan_decision_policy: "TECHNICAL_ONLY", probability_calibrated: false },
             learning_tags: ["screening_only"], detected_errors: scanError ? [scanError] : [],
           };
           setRecord(snapshot); void save(snapshot, version);
@@ -168,7 +168,8 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
-      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} tekniska kandidater (AVVAKTA) · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
+      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} {horizon === "day" ? "tekniska förfilterträffar (ej AVVAKTA-beslut)" : "tekniska kandidater (AVVAKTA)"} · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
+      {horizon === "day" && candidates.length > 0 && <p className="text-xs text-amber-300">Daytradeskannern är ett tekniskt förfilter. Samlad analys ger NO TRADE tills en separat daytrade-strategi kan bedömas.</p>}
       {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{rejected.length === 0
         ? `EJ BEDÖMT · Ingen av de ${report.checked} kontrollerade aktierna kunde bedömas med tillgänglig prisdata.`
         : report.complete
@@ -176,10 +177,10 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
           : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${rejected.length} bedömda aktierna.`}
         {unavailable.length > 0 && rejected.length > 0 && ` ${unavailable.length} ${unavailable.length === 1 ? "aktie" : "aktier"} kunde inte bedömas eftersom kursdata inte kunde verifieras.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
       {candidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
-        <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
+        <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{horizon === "day" ? "TEKNISK TRÄFF" : LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
         {item.metrics?.price && <p className="text-xs text-slate-400">Senaste candlepris: {item.metrics.price.toFixed(2)} {item.currency} · {item.metrics.latest_datetime} {item.data_snapshot?.timestamp_kind === "exchange_session_date" || horizon === "week" ? "(sessionsdatum)" : "UTC"}</p>}
-        <p>Tekniska försöksfilter uppfyllda{item.screening_setups?.length ? ` · ${item.screening_setups.join(" + ")}` : ""}. Endast bevakningskandidat; ingen godkänd TRADE-signal.</p>
+        <p>Tekniska försöksfilter uppfyllda{item.screening_setups?.length ? ` · ${item.screening_setups.join(" + ")}` : ""}. {horizon === "day" ? "Förfilterträff utan bedömd daytrade-strategi; ingen AVVAKTA- eller TRADE-signal." : "Endast bevakningskandidat; ingen godkänd TRADE-signal."}</p>
         <button className="border border-cyan-800 rounded px-3 py-2 disabled:opacity-40" disabled={busy} onClick={() => onAnalyze(item)}>Öppna samlad analys</button>
         <details><summary className="cursor-pointer text-cyan-300">Se mer – tekniska filter och kursdata</summary>
           <ul className="list-disc pl-5 mt-2">{item.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
@@ -190,7 +191,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         <p className="text-xs text-slate-400 mt-2">{horizon === "week"
           ? "Försöksfilter för swing: pris över EMA20 över EMA50, positivt femdagarsmomentum och antingen rekyl mot EMA20 eller utbrott över 20-dagars högsta med minst 1,2 gånger medianvolymen. ATR 0,2–8 procent och tillräcklig omsättning krävs. Bara färdigställda dagskurser används."
           : "Försöksfilter för daytrade: pris över EMA20 över EMA50, positivt fem-candle-momentum, RVOL minst 1, ATR 0,2–8 procent och tillräcklig candle-omsättning. Senaste 15-minuterscandle kan vara ofullständig."} Ingen validerad edge eller uppmätt träffsäkerhet.</p>
-        {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong className={item.status === "NOT_ASSESSED" ? "text-amber-300" : undefined}>{item.symbol} · {item.exchange} · {LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
+        {report.results.map((item) => <div className="text-xs mt-3" key={`${item.symbol}:${item.exchange}`}><strong className={item.status === "NOT_ASSESSED" ? "text-amber-300" : undefined}>{item.symbol} · {item.exchange} · {horizon === "day" && item.status === "WAIT" ? "TEKNISK TRÄFF" : LABELS[item.status]}</strong><p>{item.reasons.join(" ")}</p></div>)}
       </details>
       <p role="status" className="text-xs text-slate-400">{saveState === "saved" ? "Skanningsrapporten är sparad i journalen, separat från faktiska trades." : saveState === "saving" ? "Sparar skanningsrapport…" : saveState === "read_only" ? "Skanningsresultatet visas här, men previewns gemensamma journal är skrivskyddad. En BEVAKA-kandidat kan sparas separat i den lokala paperloggen efter samlad analys." : "Skanningen är inte sparad."}</p>
       {saveState === "failed" && record && <button className="text-sm text-cyan-300" onClick={() => save(record, revision.current)}>Försök spara skanningen igen</button>}

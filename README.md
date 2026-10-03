@@ -4,8 +4,11 @@ React/Vite. Swingtrading först, daytrading sekundärt. Ingen orderläggning.
 
 ## Första etappen: kompakt analys
 
-Ange en ticker och välj horisont. **Starta analys** hämtar OHLCV och nyheter
-parallellt. En valfri graf kräver explicit tickerbekräftelse. **Se mer** öppnar
+Ange en ticker och välj horisont. **Starta analys** hämtar OHLCV och fattar det
+tekniska beslutet utan nyheter. Därefter kan användaren separat hämta valfri
+nyhetsbakgrund; den påverkar inte beslutet och sparas inte i journalposten.
+En valfri graf kräver
+explicit tickerbekräftelse. **Se mer** öppnar
 hela analysoutputen och datasnapshoten. Byte av ticker, marknad eller horisont
 ogiltigförklarar resultat och avbryter gamla förfrågningar.
 Marknad kan väljas som USA, Sverige/Stockholm eller Av (endast analys).
@@ -19,12 +22,13 @@ AI-confidence används aldrig som uppgångssannolikhet. Ingen träffsäkerhet ä
 uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
 
-Från `readiness-v0.3` påverkar den experimentella swingregeln även det
-övergripande beslutet: `NO_SETUP` och `NOT_ASSESSED` ger NO TRADE med skilda
-orsakskoder. Ett giltigt `WATCH` kan högst ge AVVAKTA. Beslutets version och
-orsakskoder sparas i analyssnapshoten så att gamla och nya AVVAKTA-poster inte
-blandas som om samma urvalsregel gällde. Daytrade utan swingregel behåller
-AVVAKTA när övriga data är giltiga; någon validerad daytrade-signal finns inte.
+Från `readiness-v0.4` avgör validerad kursdata och den experimentella swingregeln
+det övergripande beslutet. Nyheter påverkar inte AVVAKTA/NO TRADE. Regeln
+`WATCH` kan högst ge AVVAKTA;
+`NO_SETUP` och `NOT_ASSESSED` ger NO TRADE med skilda orsakskoder.
+Daytrade utan en egen bedömd strategi ger NO TRADE.
+Beslutets version och orsakskoder sparas i analyssnapshoten så att poster
+från olika urvalsregler inte blandas.
 
 Manuell aktieanalys i swingläge visar nu även en experimentell pullback-/breakout-
 bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP och använder
@@ -39,7 +43,9 @@ Dagens ofärdiga dagsljus tas bort; gårdagens behålls även om börsen är öp
 Alla använda dagsljus kräver positiv volym. Färskhetsgränsen är fem kalenderdagar,
 inte en fullständig kontroll av saknade handelssessioner.
 
-Nyhetsanalys körs även utanför öppettider. Ofullständiga (`pause_turn`,
+Valfri nyhetsanalys kan köras även utanför öppettider, men den ingår inte i
+beslutet och körs inte automatiskt av skannern. Ett nyhetsfel fördröjer inte
+det tekniska beslutet. Ofullständiga (`pause_turn`,
 `max_tokens`) och felaktigt formaterade svar nekas säkert. Strukturerad
 provider-output och återupptagning av pausade sökningar är senare arbete.
 Även sökverktygsfel inuti ett HTTP 200-svar nekas. Grafbilder begränsas till
@@ -66,7 +72,7 @@ Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
 Gemensamma försöksfilter är pris > EMA20 > EMA50, positivt fem-candle-momentum,
 ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
-Swing (`v0.4-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
+Swing (`v0.5-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
 EMA20 eller ett utbrott över föregående 20 dagars högsta med minst 1,2 gånger
 medianvolymen. Pullback kräver inte förhöjd dagsvolym. Bara färdigställda
 dagskurser enligt börsens klocka används. Daytrade kräver RVOL >= 1 och
@@ -76,16 +82,16 @@ I daytradeläge kan senaste 15-minuterscandle vara ofullständig. Dessa
 startregler är inte backtestade och kan missa bra lägen. Filterpoäng 0–4 är
 aldrig vinstsannolikhet.
 
-Nyheter hämtas automatiskt för högst tre främsta tekniska kandidater.
-Negativa nyheter eller nyhetsfel ger NO TRADE i skannerns slutbedömning,
-men det tekniska upplägget visas fortfarande separat och kan öppnas i den
-samlade analysen. Sammanfattningen visar tekniska träffar och nyhetsfel var
-för sig. Kandidater utanför de tre nyhetsanropen får också NO TRADE och
-märks som utan nyhetskontroll, men deras tekniska upplägg kan öppnas.
+Skannern bedömer tekniska kandidater utan Anthropic-anrop. En swingträff kan
+högst ge AVVAKTA och öppnas i den samlade analysen. Dayträffar är bara
+tekniska förfilterträffar; samlad analys ger NO TRADE tills en separat
+daytrade-strategi finns. Saknad eller negativ nyhetsanalys ändrar inte
+försöksutfallet. Nya skanningar märks med `TECHNICAL_ONLY` och en ny
+screen-version så att de inte blandas med äldre nyhetsstyrda skanningar.
 En positiv nyhetsriktning utan faktiskt sökresultat eller citat nedgraderas
 till oklar. Visade sökkällor är länkar för kontroll, inte en verifiering av
 publiceringsdatum eller påståendenas relevans för den valda horisonten.
-Alla positiva kandidater stannar på AVVAKTA tills Risk Engine och tester finns.
+Alla tekniska swingkandidater stannar på AVVAKTA tills Risk Engine och tester finns.
 Uppenbara hävstångsprodukter filtreras bort även när aktielistan felaktigt märker
 dem som Common Stock. Produktklassningen är ännu inte fullständigt verifierad;
 warranter/certifikat kräver separat produktdata och riskanalys.
@@ -202,11 +208,11 @@ krävs fortfarande före TRADE.
 
 ## Paperlogg för framtida utfall (experimentell)
 
-En BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal paperobservation.
-Om endast nyhets-API:t fallerar kan ett tekniskt BEVAKA-upplägg sparas som
-en separat paperobservation märkt **endast teknik** medan helhetsbeslutet
-förblir NO TRADE. Resultaten hålls åtskilda från observationer med
-nyhetsanalys; det öppnar inte för en riktig TRADE-signal.
+En teknisk BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal
+paperobservation. Nyheter är valfri bakgrund och påverkar inte beslutet.
+Nya paperposter märks **endast teknik** och hålls åtskilda från äldre
+paperposter som skapades under den nyhetsstyrda beslutsregeln. Detta
+öppnar inte för en riktig TRADE-signal.
 Signalens datum, strategi, prisnivåer och uttryckliga antaganden om antal,
 avgifter, slippage och max innehavstid låses innan senare dagskurser finns.
 När samma aktie analyseras på nytt kontrolleras nya färdigställda dagskurser

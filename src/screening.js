@@ -2,7 +2,7 @@ import { validateMarketBars } from "../api/_market-data-validation.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 
-export const SCREEN_VERSION = "v0.4-experimental";
+export const SCREEN_VERSION = "v0.5-experimental";
 
 export function ema(values, period) {
   if (values.length < period) return null;

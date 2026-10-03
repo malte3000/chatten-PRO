@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 function createMockApi() {
   const saved = [];
   const newsRequests = [];
+  let marketStatusFails = false;
   function dailyBars() {
     const lastDate = new Date();
     lastDate.setUTCHours(0, 0, 0, 0);
@@ -50,6 +51,7 @@ function createMockApi() {
         validation: { valid: true }, bars, latest: bars.at(-1), price: bars.at(-1).close,
       } };
     }
+    if (pathname === "/api/market-status" && marketStatusFails) return { status: 502, body: { error: "Simulerat börsklocksfel" } };
     if (pathname === "/api/market-status") return { status: 200, body: {
       market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
     } };
@@ -96,7 +98,7 @@ function createMockApi() {
     }
     return { status: 404, body: { error: "Ingen mock finns för denna API-route." } };
   }
-  return { saved, newsRequests, handleApi };
+  return { saved, newsRequests, handleApi, setMarketStatusFailure: (value) => { marketStatusFails = value; } };
 }
 
 async function runSmoke() {
@@ -137,6 +139,8 @@ async function runSmoke() {
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
     assert.equal(saved[0].signal_inputs.record_type, "SCAN");
     assert.equal(saved[0].signal_inputs.checked, 5);
+    assert.equal(saved[0].strategy_version, "v0.5-experimental");
+    assert.equal(saved[0].signal_inputs.scan_decision_policy, "TECHNICAL_ONLY");
     assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "WAIT").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
     assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical watch candidates");
     await scanner.getByText("4 tekniska kandidater (AVVAKTA)", { exact: false }).waitFor();
@@ -161,8 +165,19 @@ async function runSmoke() {
     const result = page.getByRole("region", { name: "Samlad analys" });
     await result.getByText("BEVAKA", { exact: true }).waitFor();
     assert.equal(saved[0].signal_inputs.strategy.status, "WATCH");
+    assert.equal(saved[0].signal_inputs.news_requested, false);
+    assert.deepEqual(newsRequests, []);
     const newsDetails = result.getByText("Se mer – nyheter, graf och data", { exact: true });
-    assert.equal(await result.getByText("Fullständig motivering som visas under Se mer.", { exact: true }).isVisible(), false);
+    await newsDetails.click();
+    await result.getByText("Nyheter hämtades inte för den här analysen.", { exact: true }).waitFor();
+    await newsDetails.click();
+    const savedBeforeOptionalNews = saved.length;
+    await result.getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
+    await result.getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
+    assert.deepEqual(newsRequests, ["NVDA"]);
+    assert.equal(saved.length, savedBeforeOptionalNews);
+    assert.equal(saved[0].signal_inputs.news_requested, false);
+    assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
     await newsDetails.click();
     assert.equal(await result.getByText("Fullständig motivering som visas under Se mer.", { exact: true }).isVisible(), true);
     await newsDetails.click();
@@ -218,7 +233,7 @@ async function runSmoke() {
       await ticker.fill(failedTicker);
       await page.getByRole("button", { name: "Starta analys" }).click();
       await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
-      assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+      assert.equal(saved[0].signal_inputs.decision.status, failedTicker === "FAIL" ? "WAIT" : "NO_TRADE");
       assert.equal(saved[0].signal_inputs.strategy.status, failedTicker === "FAIL" ? "WATCH" : "NOT_ASSESSED");
       if (failedTicker === "FAILDATA") {
         assert.deepEqual(saved[0].signal_inputs.strategy.plans, []);
@@ -226,13 +241,35 @@ async function runSmoke() {
       } else {
         assert.ok(saved[0].signal_inputs.strategy.plans.length > 0);
         await page.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+        const failedAnalysis = page.getByRole("region", { name: "Samlad analys" });
+        await failedAnalysis.getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
+        await failedAnalysis.getByText(/Valfria nyheter kunde inte hämtas: Simulerat nyhetsfel/).waitFor();
+        assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
       }
     }
     await journal.getByText("Utfall i hämtad journal", { exact: true }).click();
     await journal.getByText("Avslutade faktiska trades med giltigt utfall: 1.", { exact: true }).waitFor();
-    assert.equal(await journal.getByText("1,80 R", { exact: true }).isVisible(), true);
+    assert.match(await journal.getByText("Medel-R", { exact: true }).locator("..").innerText(), /1,80 R/);
+    await page.getByLabel("Tidshorisont").selectOption("day");
+    await page.getByRole("navigation", { name: "Analysläge" }).getByRole("button", { name: "Skanna marknaden" }).click();
+    const dayScanner = page.getByRole("region", { name: "Marknadsskanner" });
+    await dayScanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
+    await dayScanner.getByText("4 tekniska förfilterträffar (ej AVVAKTA-beslut)", { exact: false }).waitFor();
+    await dayScanner.getByText("Daytradeskannern är ett tekniskt förfilter.", { exact: false }).waitFor();
+    await dayScanner.getByRole("button", { name: "Öppna samlad analys" }).first().click();
+    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
+    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    await page.getByLabel("Tidshorisont").selectOption("week");
+    mock.setMarketStatusFailure(true);
+    await page.getByRole("button", { name: "Starta analys" }).click();
+    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
+    assert.equal(saved[0].signal_inputs.strategy.status, "NOT_ASSESSED");
+    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    await page.getByRole("region", { name: "Samlad analys" }).getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
+    await page.getByRole("region", { name: "Samlad analys" }).getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
+    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: scanner, swing watch/risk calculation, actual trade save/close, details, ticker invalidation, mobile layout, missing-provider and unavailable Swedish scan regressions.");
+    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
   } finally { await browser.close(); }
 }
 
