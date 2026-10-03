@@ -3,7 +3,8 @@ import { validateCandle } from "../api/_market-data-validation.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 import { assessSwingSetup, SWING_STRATEGY_VERSION } from "./strategyModel.js";
 
-export const PAPER_VERSION = "paper-forward-v0.2";
+export const PAPER_VERSION = "paper-forward-v0.3";
+const PREVIOUS_PAPER_VERSION = "paper-forward-v0.2";
 const LEGACY_PAPER_VERSION = "paper-forward-v0.1";
 export const PAPER_BASIS = Object.freeze({ WITH_NEWS: "WITH_NEWS", TECHNICAL_ONLY: "TECHNICAL_ONLY" });
 // Keep versions that could already have produced a paper observation here when
@@ -60,8 +61,9 @@ function nextSession(market, date) {
 }
 
 function baseValid(record) {
-  if (!record || typeof record !== "object" || Array.isArray(record) || ![PAPER_VERSION, LEGACY_PAPER_VERSION].includes(record.version) || !STATUSES.has(record.status)) return false;
-  if (record.version === PAPER_VERSION && !(
+  if (!record || typeof record !== "object" || Array.isArray(record) || ![PAPER_VERSION, PREVIOUS_PAPER_VERSION, LEGACY_PAPER_VERSION].includes(record.version) || !STATUSES.has(record.status)) return false;
+  if (record.version === PAPER_VERSION && !(record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "WAIT")) return false;
+  if (record.version === PREVIOUS_PAPER_VERSION && !(
     (record.basis === PAPER_BASIS.WITH_NEWS && record.sourceDecisionStatus === "WAIT") ||
     (record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "NO_TRADE")
   )) return false;
@@ -99,17 +101,10 @@ export function validatePaperObservation(record) {
   return record.winner === (Math.abs(record.netPnl) <= 1e-8 ? null : record.netPnl > 0);
 }
 
-/** A missing news response may be logged as a technical experiment, never as a cleared signal. */
+/** All new WAIT observations use technical rules only; news never clears a signal. */
 export function paperObservationBasis(analysis) {
   if (analysis?.strategy?.status !== "WATCH") return null;
-  if (analysis?.decision?.status === "WAIT") return PAPER_BASIS.WITH_NEWS;
-  const codes = analysis?.decision?.reason_codes;
-  if (analysis?.decision?.status === "NO_TRADE" && analysis.news == null && Array.isArray(codes) &&
-      codes.includes("NEWS_MISSING_OR_MISMATCHED") &&
-      codes.every((code) => ["NEWS_MISSING_OR_MISMATCHED", "UPSTREAM_ERROR"].includes(code))) {
-    return PAPER_BASIS.TECHNICAL_ONLY;
-  }
-  return null;
+  return analysis?.decision?.status === "WAIT" ? PAPER_BASIS.TECHNICAL_ONLY : null;
 }
 
 export function createPaperObservation(analysis, { setup, holdingSessions, quantity, feePerOrder, slippageBps, recordedAt = Date.now() } = {}) {
@@ -118,7 +113,7 @@ export function createPaperObservation(analysis, { setup, holdingSessions, quant
   const market = analysis?.market;
   const config = MARKETS[market];
   const basis = paperObservationBasis(analysis);
-  if (!config || !SETUPS.has(setup) || !/swingtrading/i.test(String(analysis?.horizon || "")) || !basis || analysis?.strategy?.version !== SWING_STRATEGY_VERSION) throw new Error("Endast ett aktuellt experimentellt swingupplägg med BEVAKA, eller ett sådant tekniskt upplägg där enbart nyhetsanalysen saknas, kan följas på papper.");
+  if (!config || !SETUPS.has(setup) || !/swingtrading/i.test(String(analysis?.horizon || "")) || !basis || analysis?.strategy?.version !== SWING_STRATEGY_VERSION) throw new Error("Endast ett aktuellt experimentellt swingupplägg med AVVAKTA kan följas på papper.");
   const data = analysis.marketData;
   const ticker = upper(analysis.ticker);
   if (!ticker || upper(data?.ticker) !== ticker || (data.requested_ticker && upper(data.requested_ticker) !== ticker) || data.currency !== config.currency || !config.exchanges.has(exchangeKey(data.exchange)) || (data.requested_exchange && exchangeKey(data.requested_exchange) !== exchangeKey(data.exchange)) || data.timezone !== config.timezone || (data.market && data.market !== market)) throw new Error("Aktie, börs, valuta eller tidszon matchar inte den valda marknaden.");
@@ -216,8 +211,8 @@ export function summarizePaperObservations(records) {
     summary[counter] += 1;
     if (record.status !== "CLOSED") continue;
     const basis = record.version === LEGACY_PAPER_VERSION ? PAPER_BASIS.WITH_NEWS : record.basis;
-    const key = JSON.stringify([record.strategyVersion, record.setup, record.currency, basis]);
-    if (!groups.has(key)) groups.set(key, { strategyVersion: record.strategyVersion, setup: record.setup, currency: record.currency, basis, closedCount: 0, wins: 0, losses: 0, breakEvens: 0, winRatePercent: null, totalNetPnl: 0, totalFees: 0, expectancyR: null, profitFactor: null, _sumR: 0, _profits: 0, _losses: 0 });
+    const key = JSON.stringify([record.version, record.strategyVersion, record.setup, record.currency, basis]);
+    if (!groups.has(key)) groups.set(key, { paperVersion: record.version, strategyVersion: record.strategyVersion, setup: record.setup, currency: record.currency, basis, closedCount: 0, wins: 0, losses: 0, breakEvens: 0, winRatePercent: null, totalNetPnl: 0, totalFees: 0, expectancyR: null, profitFactor: null, _sumR: 0, _profits: 0, _losses: 0 });
     const group = groups.get(key);
     group.closedCount += 1; group.wins += record.winner === true ? 1 : 0; group.losses += record.winner === false ? 1 : 0; group.breakEvens += record.winner === null ? 1 : 0;
     group.totalNetPnl += record.netPnl; group.totalFees += record.totalFees; group._sumR += record.resultR;
@@ -226,6 +221,6 @@ export function summarizePaperObservations(records) {
   summary.groups = [...groups.values()].map((group) => {
     const { _sumR, _profits, _losses, ...publicGroup } = group;
     return { ...publicGroup, totalNetPnl: Number.isFinite(group.totalNetPnl) ? group.totalNetPnl : null, totalFees: Number.isFinite(group.totalFees) ? group.totalFees : null, winRatePercent: group.wins / group.closedCount * 100, expectancyR: Number.isFinite(_sumR) ? _sumR / group.closedCount : null, profitFactor: _losses > 0 && Number.isFinite(_profits / _losses) ? _profits / _losses : null };
-  }).sort((a, b) => JSON.stringify([a.strategyVersion, a.setup, a.currency, a.basis]).localeCompare(JSON.stringify([b.strategyVersion, b.setup, b.currency, b.basis])));
+  }).sort((a, b) => JSON.stringify([a.paperVersion, a.strategyVersion, a.setup, a.currency, a.basis]).localeCompare(JSON.stringify([b.paperVersion, b.strategyVersion, b.setup, b.currency, b.basis])));
   return summary;
 }

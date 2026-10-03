@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { assessSwingSetup } from "../src/strategyModel.js";
-import { PAPER_BASIS, createPaperObservation, paperObservationBasis, settlePaperObservation, summarizePaperObservations, supportsPaperStrategyVersion, validatePaperObservation } from "../src/paperModel.js";
+import { PAPER_BASIS, PAPER_VERSION, createPaperObservation, paperObservationBasis, settlePaperObservation, summarizePaperObservations, supportsPaperStrategyVersion, validatePaperObservation } from "../src/paperModel.js";
 
 const monday = Date.parse("2026-09-28T21:00:00Z");
 const options = { setup: "BREAKOUT", holdingSessions: 3, quantity: 2, feePerOrder: 1, slippageBps: 10, recordedAt: monday };
@@ -42,7 +42,8 @@ test("captures a current WATCH once, freezes its signal inputs, and is JSON-vali
   assert.equal(paper.id, "paper:TEST-analysis-1:BREAKOUT");
   assert.equal(paper.signalDate, "2026-09-28");
   assert.equal(paper.signalBar.close, 149);
-  assert.equal(paper.basis, PAPER_BASIS.WITH_NEWS);
+  assert.equal(paper.version, PAPER_VERSION);
+  assert.equal(paper.basis, PAPER_BASIS.TECHNICAL_ONLY);
   assert.equal(paper.sourceDecisionStatus, "WAIT");
   assert.ok(validatePaperObservation(paper));
   assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(paper))));
@@ -52,51 +53,61 @@ test("captures a current WATCH once, freezes its signal inputs, and is JSON-vali
   assert.equal(paper.signalBar.close, 149);
 });
 
-test("a missing-news NO TRADE can be captured only as a distinct technical paper observation", () => {
+test("new WAIT captures use technical-only basis regardless of optional news", () => {
   const analysis = fixture();
-  analysis.news = null;
-  analysis.decision = { status: "NO_TRADE", reason_codes: ["UPSTREAM_ERROR", "NEWS_MISSING_OR_MISMATCHED"] };
   assert.equal(paperObservationBasis(analysis), PAPER_BASIS.TECHNICAL_ONLY);
-  const record = createPaperObservation(analysis, options);
-  assert.equal(record.basis, PAPER_BASIS.TECHNICAL_ONLY);
-  assert.equal(record.sourceDecisionStatus, "NO_TRADE");
-  assert.ok(validatePaperObservation(record));
-  assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(record))));
-  assert.equal(validatePaperObservation({ ...record, basis: PAPER_BASIS.WITH_NEWS }), false);
-  assert.equal(validatePaperObservation({ ...record, sourceDecisionStatus: "WAIT" }), false);
-  const full = createPaperObservation({ ...fixture(), record: { trade_id: "TEST-analysis-2", signal_inputs: { record_type: "ANALYSIS" } } }, options);
-  const followup = later(analysis, day(tuesday, 149.7, 150.5, 149.5, 150), day(wednesday, 150.7, 151.5, 150.5, 151), day(thursday, 151.7, 152.5, 151.5, 152));
-  const closedTechnical = settlePaperObservation(record, followup, { now: closeTime(thursday) });
-  const closedFull = settlePaperObservation(full, followup, { now: closeTime(thursday) });
-  const summary = summarizePaperObservations([closedTechnical, closedFull]);
-  assert.equal(summary.closedCount, 2);
-  assert.deepEqual(summary.groups.map((group) => group.basis).sort(), [PAPER_BASIS.TECHNICAL_ONLY, PAPER_BASIS.WITH_NEWS].sort());
+  const withoutNews = createPaperObservation(analysis, options);
+  analysis.news = { ticker: "TEST", direction: "ner" };
+  assert.equal(paperObservationBasis(analysis), PAPER_BASIS.TECHNICAL_ONLY);
+  const withNews = createPaperObservation(analysis, options);
+  assert.deepEqual(withNews, withoutNews);
+  assert.equal(validatePaperObservation({ ...withoutNews, basis: PAPER_BASIS.WITH_NEWS }), false);
+  assert.equal(validatePaperObservation({ ...withoutNews, sourceDecisionStatus: "NO_TRADE" }), false);
 });
 
-test("technical paper capture rejects other NO TRADE causes and remains backward compatible", () => {
-  for (const change of [
-    (a) => { a.decision.reason_codes.push("MARKET_DATA_INVALID"); },
-    (a) => { a.decision.reason_codes.push("NEWS_BEARISH"); },
-    (a) => { a.news = { ticker: "TEST", direction: "ner" }; },
-    (a) => { a.decision.reason_codes = ["UPSTREAM_ERROR"]; },
-    (a) => { a.strategy.status = "NO_SETUP"; },
-  ]) {
-    const analysis = fixture();
-    analysis.news = null;
-    analysis.decision = { status: "NO_TRADE", reason_codes: ["UPSTREAM_ERROR", "NEWS_MISSING_OR_MISMATCHED"] };
-    change(analysis);
-    assert.equal(paperObservationBasis(analysis), null);
-    assert.throws(() => createPaperObservation(analysis, options));
-  }
-  const legacy = createPaperObservation(fixture(), options);
-  legacy.version = "paper-forward-v0.1";
+test("historical v0.1 and v0.2 records remain valid and outcome groups separate rule versions", () => {
+  const analysis = fixture();
+  const current = createPaperObservation(analysis, options);
+  const oldTechnical = {
+    ...current, version: "paper-forward-v0.2", sourceDecisionStatus: "NO_TRADE",
+    sourceAnalysisTradeId: "TEST-old-technical", id: "paper:TEST-old-technical:BREAKOUT",
+  };
+  const oldWithNews = {
+    ...current, version: "paper-forward-v0.2", basis: PAPER_BASIS.WITH_NEWS,
+    sourceAnalysisTradeId: "TEST-old-news", id: "paper:TEST-old-news:BREAKOUT",
+  };
+  const legacy = {
+    ...current, version: "paper-forward-v0.1",
+    sourceAnalysisTradeId: "TEST-legacy", id: "paper:TEST-legacy:BREAKOUT",
+  };
   delete legacy.basis;
   delete legacy.sourceDecisionStatus;
-  assert.ok(validatePaperObservation(legacy));
+  for (const record of [current, oldTechnical, oldWithNews, legacy]) {
+    assert.ok(validatePaperObservation(record));
+    assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(record))));
+  }
+  assert.equal(validatePaperObservation({ ...oldTechnical, sourceDecisionStatus: "WAIT" }), false);
+  assert.equal(validatePaperObservation({ ...oldWithNews, sourceDecisionStatus: "NO_TRADE" }), false);
+  const followup = later(analysis, day(tuesday, 149.7, 150.5, 149.5, 150), day(wednesday, 150.7, 151.5, 150.5, 151), day(thursday, 151.7, 152.5, 151.5, 152));
+  const summary = summarizePaperObservations([current, oldTechnical, oldWithNews, legacy].map((record) => settlePaperObservation(record, followup, { now: closeTime(thursday) })));
+  assert.equal(summary.closedCount, 4);
+  assert.deepEqual(summary.groups.map((group) => [group.paperVersion, group.basis]).sort(), [
+    ["paper-forward-v0.1", PAPER_BASIS.WITH_NEWS],
+    ["paper-forward-v0.2", PAPER_BASIS.TECHNICAL_ONLY],
+    ["paper-forward-v0.2", PAPER_BASIS.WITH_NEWS],
+    [PAPER_VERSION, PAPER_BASIS.TECHNICAL_ONLY],
+  ].sort());
+});
+
+test("a NO TRADE decision cannot be captured as a new paper observation, even for an old news failure", () => {
+  const analysis = fixture();
+  analysis.decision = { version: "readiness-v0.3", status: "NO_TRADE", reason_codes: ["UPSTREAM_ERROR", "NEWS_MISSING_OR_MISMATCHED"] };
+  assert.equal(paperObservationBasis(analysis), null);
+  assert.throws(() => createPaperObservation(analysis, options));
 });
 
 test("a captured v0.2 paper record remains a readable historical version after a future strategy bump", () => {
-  const record = createPaperObservation(fixture(), options);
+  const record = { ...createPaperObservation(fixture(), options), version: "paper-forward-v0.2", sourceDecisionStatus: "NO_TRADE" };
   assert.equal(record.strategyVersion, "swing-v0.2-experimental");
   assert.ok(validatePaperObservation(record));
   assert.equal(supportsPaperStrategyVersion(record.strategyVersion, "swing-v0.3-experimental"), true);

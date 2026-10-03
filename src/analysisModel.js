@@ -1,12 +1,12 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
 
 export const STRATEGY_VERSION = "v0.2-readiness";
-export const READINESS_VERSION = "readiness-v0.3";
+export const READINESS_VERSION = "readiness-v0.4";
 export const normalizeTicker = (value) => String(value || "").trim().toUpperCase();
 const readinessDecision = (status, reasons, reason_codes) => ({ version: READINESS_VERSION, status, reasons, reason_codes });
 
-// Readiness only. AI confidence and experimental setups cannot approve a trade.
-export function evaluateReadiness({ ticker, marketData, news, strategy, errors = [] }) {
+// Readiness only. News is not a gate, and experimental setups cannot approve a trade.
+export function evaluateReadiness({ ticker, marketData, strategy, errors = [] }) {
   const reasons = [...errors];
   const reason_codes = errors.length ? ["UPSTREAM_ERROR"] : [];
   const matches = normalizeTicker(marketData?.ticker) === normalizeTicker(ticker) &&
@@ -19,26 +19,18 @@ export function evaluateReadiness({ ticker, marketData, news, strategy, errors =
     reasons.push("Giltigt aktuellt pris saknas.");
     reason_codes.push("PRICE_INVALID");
   }
-  if (!news || normalizeTicker(news.ticker) !== normalizeTicker(ticker)) {
-    reasons.push("Nyhetsanalys för aktuell ticker saknas.");
-    reason_codes.push("NEWS_MISSING_OR_MISMATCHED");
-  }
-  if (news && !["upp", "ner", "oklart"].includes(news.direction)) {
-    reasons.push("Nyhetsriktningen är ogiltig.");
-    reason_codes.push("NEWS_DIRECTION_INVALID");
-  }
   if (reasons.length) return readinessDecision("NO_TRADE", reasons, reason_codes);
-  if (news.direction === "ner") return readinessDecision("NO_TRADE", ["Nyhetsläget talar mot en lång position."], ["NEWS_BEARISH"]);
   if (strategy?.status === "NO_SETUP") return readinessDecision("NO_TRADE", ["Inget experimentellt swingupplägg uppfyllde reglerna på senaste stängda dagsljuset."], ["SWING_NO_SETUP"]);
   if (strategy?.status === "NOT_ASSESSED") return readinessDecision("NO_TRADE", ["Swingupplägget kunde inte bedömas med tillgängliga färdigställda dagsljus."], ["SWING_NOT_ASSESSED"]);
-  if (strategy && strategy.status !== "WATCH") return readinessDecision("NO_TRADE", ["Strategibedömningen har en ogiltig status."], ["STRATEGY_STATUS_INVALID"]);
+  if (!strategy) return readinessDecision("NO_TRADE", ["Ett bedömt swingupplägg saknas för vald horisont. TRADE är spärrat."], ["NO_VALIDATED_STRATEGY"]);
+  if (strategy.status !== "WATCH") return readinessDecision("NO_TRADE", ["Strategibedömningen har en ogiltig status."], ["STRATEGY_STATUS_INVALID"]);
   return readinessDecision("WAIT", [
-    news.direction === "upp" ? "Nyhetsläget kan motivera fortsatt analys, inte en trade." : "Nyhetsläget ger ingen tydlig riktning.",
+    "Tekniskt swingupplägg uppfyllde försöksreglerna på senast stängda dagsljuset. Nyheter ingår inte i bedömningen.",
     "Validerad signalmotor, riskmotor och utvärderad edge saknas. TRADE är spärrat.",
-  ], [news.direction === "upp" ? "NEWS_SUPPORTIVE" : "NEWS_UNCLEAR", strategy ? "SWING_WATCH_UNVALIDATED" : "NO_VALIDATED_STRATEGY"]);
+  ], ["SWING_WATCH_UNVALIDATED"]);
 }
 
-export function createAnalysisRecord({ ticker, horizon, market, marketData, news, chart, decision, strategy }, { now = new Date(), id = globalThis.crypto.randomUUID() } = {}) {
+export function createAnalysisRecord({ ticker, horizon, market, marketData, news, newsRequested = false, newsError = null, chart, decision, strategy }, { now = new Date(), id = globalThis.crypto.randomUUID() } = {}) {
   // Keep the existing database enum compatible. WAIT lives in the snapshot.
   // Analysis observations are never OPEN trades or measured probabilities.
   return {
@@ -51,6 +43,8 @@ export function createAnalysisRecord({ ticker, horizon, market, marketData, news
     signal_inputs: {
       record_type: "ANALYSIS", decision, horizon, market, strategy: strategy || null,
       market_data: marketData || null, news: news || null, chart: chart || null,
+      news_requested: newsRequested === true,
+      news_error: typeof newsError === "string" && newsError.trim() ? newsError.trim() : null,
       probability_calibrated: false,
       confidence_note: "Legacy required field is 0; not a probability or measured accuracy.",
     },

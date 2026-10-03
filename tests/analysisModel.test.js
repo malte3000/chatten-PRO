@@ -7,14 +7,22 @@ const marketData = {
   bars: [{ datetime: "2026-09-16", open: 99, high: 101, low: 98, close: 100, volume: 1000 }],
 };
 const news = { ticker: "NVDA", direction: "upp", direction_confidence: 100 };
-const input = { ticker: "NVDA", marketData, news };
+const strategy = { version: "swing-v-test", status: "WATCH", setups: ["BREAKOUT"] };
+const input = { ticker: "NVDA", marketData, news: null, strategy };
 
-test("AI confidence of 100 cannot approve TRADE", () => assert.equal(evaluateReadiness(input).status, "WAIT"));
-test("swing WATCH is only a measurable WAIT candidate, never TRADE", () => {
-  const decision = evaluateReadiness({ ...input, strategy: { version: "swing-v-test", status: "WATCH", setups: ["BREAKOUT"] } });
+test("swing WATCH without news is a technical WAIT candidate, never TRADE", () => {
+  const decision = evaluateReadiness(input);
   assert.equal(decision.status, "WAIT");
-  assert.deepEqual(decision.reason_codes, ["NEWS_SUPPORTIVE", "SWING_WATCH_UNVALIDATED"]);
+  assert.equal(decision.version, "readiness-v0.4");
+  assert.deepEqual(decision.reason_codes, ["SWING_WATCH_UNVALIDATED"]);
+  assert.match(decision.reasons[0], /Nyheter ingår inte/);
   assert.match(decision.reasons[1], /TRADE är spärrat/);
+});
+test("positive, bearish, mismatched and malformed news do not alter technical readiness", () => {
+  const expected = evaluateReadiness(input);
+  for (const optionalNews of [news, { ...news, direction: "ner" }, { ...news, ticker: "AMD" }, { ...news, direction: "invalid" }]) {
+    assert.deepEqual(evaluateReadiness({ ...input, news: optionalNews }), expected);
+  }
 });
 test("missing swing setup and unassessed setup fail closed for distinct reasons", () => {
   const noSetup = evaluateReadiness({ ...input, strategy: { status: "NO_SETUP", setups: [] } });
@@ -30,11 +38,11 @@ test("unknown strategy status cannot become a candidate", () => {
   assert.equal(decision.status, "NO_TRADE");
   assert.deepEqual(decision.reason_codes, ["STRATEGY_STATUS_INVALID"]);
 });
-test("no swing strategy, such as day mode, retains readiness WAIT without implying TRADE", () => {
+test("day mode without an assessed strategy remains NO TRADE", () => {
   const decision = evaluateReadiness({ ...input, horizon: "samma handelsdag", strategy: null });
-  assert.equal(decision.status, "WAIT");
-  assert.deepEqual(decision.reason_codes, ["NEWS_SUPPORTIVE", "NO_VALIDATED_STRATEGY"]);
-  assert.match(decision.reasons[1], /Validerad signalmotor, riskmotor och utvärderad edge saknas/);
+  assert.equal(decision.status, "NO_TRADE");
+  assert.deepEqual(decision.reason_codes, ["NO_VALIDATED_STRATEGY"]);
+  assert.match(decision.reasons[0], /TRADE är spärrat/);
 });
 test("every readiness outcome carries the same explicit decision version", () => {
   const cases = [
@@ -57,27 +65,27 @@ test("missing, mismatched and invalid market data fail closed", () => {
     assert.equal(evaluateReadiness({ ...input, marketData: data }).status, "NO_TRADE");
   }
 });
-test("stale news or API errors fail closed", () => {
-  assert.equal(evaluateReadiness({ ...input, news: { ...news, ticker: "AMD" } }).status, "NO_TRADE");
+test("required upstream data errors fail closed even with a valid technical setup", () => {
   assert.equal(evaluateReadiness({ ...input, errors: ["Provider unavailable"] }).status, "NO_TRADE");
-});
-test("bearish news never becomes bullish because confidence is low", () => {
-  const decision = evaluateReadiness({ ...input, news: { ...news, direction: "ner", direction_confidence: 30 }, strategy: { status: "WATCH" } });
-  assert.equal(decision.status, "NO_TRADE");
-  assert.deepEqual(decision.reason_codes, ["NEWS_BEARISH"]);
+  assert.deepEqual(evaluateReadiness({ ...input, errors: ["Provider unavailable"] }).reason_codes, ["UPSTREAM_ERROR"]);
 });
 test("same inputs produce identical decisions", () => assert.deepEqual(evaluateReadiness(input), evaluateReadiness(structuredClone(input))));
 test("analysis observations retain WAIT but are not actual trades", () => {
   const record = createAnalysisRecord({ ...input, horizon: "week", market: "usa", decision: evaluateReadiness(input) }, { now: new Date("2026-09-16T12:00:00Z"), id: "fixed" });
   assert.equal(record.signal_inputs.decision.status, "WAIT");
   assert.equal(record.signal_inputs.decision.version, READINESS_VERSION);
-  assert.deepEqual(record.signal_inputs.decision.reason_codes, ["NEWS_SUPPORTIVE", "NO_VALIDATED_STRATEGY"]);
+  assert.deepEqual(record.signal_inputs.decision.reason_codes, ["SWING_WATCH_UNVALIDATED"]);
   assert.equal(record.signal_inputs.record_type, "ANALYSIS");
   assert.equal(record.signal, "NO_TRADE");
   assert.equal(record.entry_price, null);
   assert.equal(record.winner, null);
   assert.equal(record.confidence, 0);
   assert.equal(record.trade_id, "NVDA-fixed");
+  assert.equal(record.signal_inputs.news_requested, false);
+  assert.equal(record.signal_inputs.news_error, null);
+  const withFailedOptionalNews = createAnalysisRecord({ ...input, newsRequested: true, newsError: " Anthropic unavailable " }, { now: new Date("2026-09-16T12:00:00Z"), id: "news-error" });
+  assert.equal(withFailedOptionalNews.signal_inputs.news_requested, true);
+  assert.equal(withFailedOptionalNews.signal_inputs.news_error, "Anthropic unavailable");
 });
 
 test("analysis and manually logged trade retain experimental strategy version and source", () => {
