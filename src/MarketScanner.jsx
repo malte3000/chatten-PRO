@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { rankCandidates, SCREEN_VERSION } from "./screening.js";
 import { fetchJson } from "./apiClient.js";
-import NewsEvidence from "./NewsEvidence.jsx";
 
 const LABELS = { WAIT: "AVVAKTA", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT · KURSDATA EJ VERIFIERAD" };
 
@@ -104,34 +103,13 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         if (!Array.isArray(batch.results) || !Number.isInteger(batch.next_offset) || batch.next_offset <= offset || batch.next_offset > limit) throw new Error("Skannerns svar är ogiltigt.");
         quotaRetries = 0;
         offset = batch.next_offset; target = batch.total; universeSize = batch.universe_size;
-        // Keep the technical result visible if a later news request fails.
-        results = rankCandidates([...results, ...batch.results.map((item) => ({ ...item, screening_status: item.status }))]);
+        results = rankCandidates([...results, ...batch.results]);
         complete = batch.done === true;
         if (version !== revision.current) return;
         setReport({ results, checked: offset, target, universeSize, complete: false, seed });
         if (!complete) {
           setProgress(`Väntar på databudget · ${offset}/${target} aktier kontrollerade. Du kan stoppa skanningen.`);
           await pause(Math.max(0, Math.min(batch.wait_ms || 0, 120000)), abort.signal);
-        }
-      }
-      const technicalMatches = results.filter((item) => item.status === "WAIT");
-      const shortlist = technicalMatches.slice(0, 3);
-      for (const item of technicalMatches.slice(3)) {
-        item.status = "NO_TRADE"; item.news_skipped = true;
-        item.reasons = [...item.reasons, "Nyhetsanalys gjordes inte för denna kandidat (högst tre per skanning)."];
-      }
-      for (let index = 0; index < shortlist.length; index++) {
-        const item = shortlist[index];
-        setProgress(`Analyserar nyheter · ${index + 1}/${shortlist.length} kandidater…`);
-        try {
-          const news = await api("/api/analyze-news", { ticker: item.symbol, companyName: item.name, exchange: item.exchange, horizonText: horizon === "week" ? "1–5 handelsdagar (swingtrading)" : "samma handelsdag", market }, abort.signal);
-          if (news.ticker !== item.symbol || !["upp", "ner", "oklart"].includes(news.direction)) throw new Error("Nyhetsanalysen matchar inte kandidaten.");
-          item.news = news;
-          if (news.direction === "ner") { item.status = "NO_TRADE"; item.reasons = [...item.reasons, "Nyhetsläget talar mot en lång position."]; }
-        } catch (problem) {
-          if (abort.signal.aborted) throw problem;
-          item.status = "NO_TRADE"; item.news_error = problem.message;
-          item.reasons = [...item.reasons, `Nyhetsanalysen misslyckades: ${problem.message}`];
         }
       }
     } catch (problem) {
@@ -162,9 +140,6 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
   }
 
   const candidates = report?.results.filter((item) => item.status === "WAIT") || [];
-  const technicalCandidates = report?.results.filter((item) => item.screening_status === "WAIT") || [];
-  const newsErrors = technicalCandidates.filter((item) => item.news_error);
-  const newsSkipped = technicalCandidates.filter((item) => item.news_skipped);
   const rejected = report?.results.filter((item) => item.status === "NO_TRADE") || [];
   const unavailable = report?.results.filter((item) => item.status === "NOT_ASSESSED") || [];
   return <section className="border border-cyan-900 rounded-lg p-4 space-y-3" aria-label="Marknadsskanner">
@@ -185,7 +160,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
       <p className="text-xs text-slate-400">Avläst {creditUsage.fetched_at ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", dateStyle: "short", timeStyle: "medium" }).format(new Date(creditUsage.fetched_at)) : "just nu"} (svensk tid).</p>
     </div>}
     {creditUsageError && <p role="alert" className="text-sm text-amber-300">Kunde inte visa API-krediter: {creditUsageError}</p>}
-    <p className="text-xs text-slate-400">Automatiskt urval av stödda aktier, inte hela börsen. Ett nytt klick samma UTC-dag ger normalt samma aktier; en större budget utökar urvalet. Skanningen kan ta flera minuter på grund av API-kvoten. Nyheter hämtas för högst tre kandidater.</p>
+    <p className="text-xs text-slate-400">Automatiskt urval av stödda aktier, inte hela börsen. Ett nytt klick samma UTC-dag ger normalt samma aktier; en större budget utökar urvalet. Skanningen kan ta flera minuter på grund av API-kvoten. Kandidater bedöms enbart med tekniska filter.</p>
     {market === "off" && <p className="text-sm text-amber-300">Välj USA eller Sverige för att ange vilken marknad som ska skannas. Av finns kvar för manuell analys.</p>}
     <p className="text-xs text-slate-400">Skannern försöker utesluta warranter och certifikat, men datakällans produktklassning behöver verifieras. Separat produktdata och riskkontroll krävs för dem.</p>
     {market === "stockholm" && <p className="text-xs text-slate-400">Sveriges aktielista kan innehålla instrument utan tillgänglig prisdata. De markeras EJ BEDÖMT; ingen teknisk slutsats dras.</p>}
@@ -193,24 +168,22 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
-      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {technicalCandidates.length} tekniska kandidater · {candidates.length} kvar som AVVAKTA{newsErrors.length > 0 ? ` · ${newsErrors.length} med nyhetsfel` : ""}{newsSkipped.length > 0 ? ` · ${newsSkipped.length} utan nyhetskontroll` : ""} · {rejected.length} NO TRADE · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
-      {!busy && report.checked > 0 && !technicalCandidates.length && <p className="text-sm">{rejected.length === 0
+      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} tekniska kandidater (AVVAKTA) · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
+      {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{rejected.length === 0
         ? `EJ BEDÖMT · Ingen av de ${report.checked} kontrollerade aktierna kunde bedömas med tillgänglig prisdata.`
         : report.complete
           ? `NO TRADE för de ${rejected.length} bedömda aktierna i det här urvalet. Ingen blev analyskandidat.`
           : `Ofullständigt urval · Hittills ingen analyskandidat bland de ${rejected.length} bedömda aktierna.`}
         {unavailable.length > 0 && rejected.length > 0 && ` ${unavailable.length} ${unavailable.length === 1 ? "aktie" : "aktier"} kunde inte bedömas eftersom kursdata inte kunde verifieras.`} Övriga {Math.max(0, report.universeSize - report.checked)} aktier i datakällans lista har inte kontrollerats.</p>}
-      {technicalCandidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
+      {candidates.slice(0, 5).map((item) => <article key={`${item.symbol}:${item.exchange}`} className="border-t border-slate-800 pt-3 space-y-2 text-sm">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{item.symbol} · {item.name}</h3><span className="text-cyan-300">{LABELS[item.status]}</span></div>
         <p className="text-xs text-slate-400">{item.exchange} · {item.currency} · Filterpoäng {item.rank_score}/4, inte vinstsannolikhet</p>
         {item.metrics?.price && <p className="text-xs text-slate-400">Senaste candlepris: {item.metrics.price.toFixed(2)} {item.currency} · {item.metrics.latest_datetime} {item.data_snapshot?.timestamp_kind === "exchange_session_date" || horizon === "week" ? "(sessionsdatum)" : "UTC"}</p>}
-        <p>{item.news_error ? `Tekniskt upplägg hittat, men nyhetsanalysen misslyckades: ${item.news_error}` : item.news_skipped ? "Tekniskt upplägg hittat, men nyhetsanalys gjordes inte (högst tre per skanning)." : item.news?.summary || "Tekniska försöksfilter uppfyllda. Nyhetsanalys " + (busy ? "kan återstå." : "saknas för denna kandidat.")}</p>
-        <NewsEvidence news={item.news} />
+        <p>Tekniska försöksfilter uppfyllda{item.screening_setups?.length ? ` · ${item.screening_setups.join(" + ")}` : ""}. Endast bevakningskandidat; ingen godkänd TRADE-signal.</p>
         <button className="border border-cyan-800 rounded px-3 py-2 disabled:opacity-40" disabled={busy} onClick={() => onAnalyze(item)}>Öppna samlad analys</button>
-        <details><summary className="cursor-pointer text-cyan-300">Se mer – tester och nyheter</summary>
+        <details><summary className="cursor-pointer text-cyan-300">Se mer – tekniska filter och kursdata</summary>
           <ul className="list-disc pl-5 mt-2">{item.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-          {item.news && <p className="whitespace-pre-wrap mt-2">{item.news.reasoning}</p>}
-          <pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto mt-2">{JSON.stringify({ metrics: item.metrics, news: item.news || null, data_snapshot: item.data_snapshot || null }, null, 2)}</pre>
+          <pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-auto mt-2">{JSON.stringify({ metrics: item.metrics, data_snapshot: item.data_snapshot || null }, null, 2)}</pre>
         </details>
       </article>)}
       <details className="border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-cyan-300">Se mer – alla {report.results.length} instrument och bedömningar</summary>

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 
 function createMockApi() {
   const saved = [];
+  const newsRequests = [];
   function dailyBars() {
     const lastDate = new Date();
     lastDate.setUTCHours(0, 0, 0, 0);
@@ -33,8 +34,11 @@ function createMockApi() {
     if (pathname === "/api/scan") return { status: 200, body: {
       results: [
         { symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 4, metrics: { rvol: 2, atr: 2 }, reasons: ["Experimental trend filters passed"] },
+        { symbol: "MOCKA", name: "Mock A", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 3, metrics: { rvol: 1.5 }, reasons: ["Technical filters passed"] },
+        { symbol: "MOCKB", name: "Mock B", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 2, metrics: { rvol: 1.4 }, reasons: ["Technical filters passed"] },
+        { symbol: "MOCKC", name: "Mock C", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 1, metrics: { rvol: 1.3 }, reasons: ["Technical filters passed"] },
         { symbol: "BAD", name: "Rejected", exchange: "NYSE", status: "NO_TRADE", rank_score: 0, reasons: ["Missing reliable volume"] },
-      ], next_offset: 2, total: 2, universe_size: 1000, done: true, wait_ms: 0,
+      ], next_offset: 5, total: 5, universe_size: 1000, done: true, wait_ms: 0,
     } };
     if (pathname === "/api/market-data") {
       const ticker = searchParams.get("ticker");
@@ -50,6 +54,7 @@ function createMockApi() {
       market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
     } };
     if (pathname === "/api/analyze-news") {
+      newsRequests.push(input.ticker);
       if (input.ticker === "FAIL") return { status: 502, body: { error: "Simulerat nyhetsfel" } };
       return { status: 200, body: {
         ticker: input.ticker, direction: "upp", direction_confidence: 100, probability_up: null,
@@ -91,7 +96,7 @@ function createMockApi() {
     }
     return { status: 404, body: { error: "Ingen mock finns för denna API-route." } };
   }
-  return { saved, handleApi };
+  return { saved, newsRequests, handleApi };
 }
 
 async function runSmoke() {
@@ -104,7 +109,7 @@ async function runSmoke() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const mock = createMockApi();
-    const { saved } = mock;
+    const { saved, newsRequests } = mock;
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -131,12 +136,15 @@ async function runSmoke() {
     await scanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
     assert.equal(saved[0].signal_inputs.record_type, "SCAN");
-    assert.equal(saved[0].signal_inputs.checked, 2);
+    assert.equal(saved[0].signal_inputs.checked, 5);
+    assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "WAIT").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
+    assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical watch candidates");
+    await scanner.getByText("4 tekniska kandidater (AVVAKTA)", { exact: false }).waitFor();
     await page.screenshot({ path: "tests/preview-scanner-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.screenshot({ path: "tests/preview-scanner-mobile.png", fullPage: true });
-    await scanner.getByRole("button", { name: "Öppna samlad analys" }).click();
+    await scanner.getByRole("button", { name: "Öppna samlad analys" }).first().click();
     await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
     assert.equal(saved[0].ticker, "NVDA");
     assert.equal(saved[0].signal_inputs.record_type, "ANALYSIS");
