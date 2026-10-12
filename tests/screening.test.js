@@ -48,6 +48,11 @@ test("old or future timestamps are rejected", () => {
     assert.ok(result.data_issue);
   }
 });
+test("a missing just-closed daily session cannot become a swing candidate", () => {
+  const result = screenInstrument(instrument, data, { market: "usa", now: Date.parse("2026-09-16T21:00:00Z") });
+  assert.equal(result.status, "NOT_ASSESSED");
+  assert.match(result.reasons.join(" "), /2026-09-16/);
+});
 test("swing screen discards an unfinished daily candle and uses it only after close", () => {
   const current = { datetime: "2026-09-16", open: 150, high: 151, low: 149, close: 150, volume: 100 };
   const withCurrent = { ...data, bars: [...bars, current] };

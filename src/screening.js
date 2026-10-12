@@ -2,7 +2,7 @@ import { validateMarketBars } from "../api/_market-data-validation.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 
-export const SCREEN_VERSION = "v0.5-experimental";
+export const SCREEN_VERSION = "v0.6-experimental";
 
 export function ema(values, period) {
   if (values.length < period) return null;
@@ -32,7 +32,7 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
     if (completedBars.some((bar) => !Number.isFinite(bar?.volume) || bar.volume <= 0)) {
       return unavailable("UNRELIABLE_VOLUME", "Positiv och tillförlitlig volym krävs för varje använd dagskurs.");
     }
-    const selection = selectClosedDailyBars({ ...marketData, bars: completedBars }, { marketStatus, now, minBars: 60 });
+    const selection = selectClosedDailyBars({ ...marketData, bars: completedBars }, { marketStatus, now, minBars: 60, requireExpectedSession: true });
     if (!selection.valid) return unavailable("INVALID_DAILY_DATA", selection.reasons.join(" "));
     bars = selection.bars;
     base.screening_selection = {

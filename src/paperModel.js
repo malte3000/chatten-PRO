@@ -211,8 +211,8 @@ export function summarizePaperObservations(records) {
     summary[counter] += 1;
     if (record.status !== "CLOSED") continue;
     const basis = record.version === LEGACY_PAPER_VERSION ? PAPER_BASIS.WITH_NEWS : record.basis;
-    const key = JSON.stringify([record.version, record.strategyVersion, record.setup, record.currency, basis]);
-    if (!groups.has(key)) groups.set(key, { paperVersion: record.version, strategyVersion: record.strategyVersion, setup: record.setup, currency: record.currency, basis, closedCount: 0, wins: 0, losses: 0, breakEvens: 0, winRatePercent: null, totalNetPnl: 0, totalFees: 0, expectancyR: null, profitFactor: null, _sumR: 0, _profits: 0, _losses: 0 });
+    const key = JSON.stringify([record.version, record.strategyVersion, record.setup, record.currency, basis, record.holdingSessions, record.quantity, record.feePerOrder, record.slippageBps]);
+    if (!groups.has(key)) groups.set(key, { paperVersion: record.version, strategyVersion: record.strategyVersion, setup: record.setup, currency: record.currency, basis, holdingSessions: record.holdingSessions, quantity: record.quantity, feePerOrder: record.feePerOrder, slippageBps: record.slippageBps, closedCount: 0, wins: 0, losses: 0, breakEvens: 0, winRatePercent: null, totalNetPnl: 0, totalFees: 0, expectancyR: null, profitFactor: null, _sumR: 0, _profits: 0, _losses: 0 });
     const group = groups.get(key);
     group.closedCount += 1; group.wins += record.winner === true ? 1 : 0; group.losses += record.winner === false ? 1 : 0; group.breakEvens += record.winner === null ? 1 : 0;
     group.totalNetPnl += record.netPnl; group.totalFees += record.totalFees; group._sumR += record.resultR;
@@ -221,6 +221,6 @@ export function summarizePaperObservations(records) {
   summary.groups = [...groups.values()].map((group) => {
     const { _sumR, _profits, _losses, ...publicGroup } = group;
     return { ...publicGroup, totalNetPnl: Number.isFinite(group.totalNetPnl) ? group.totalNetPnl : null, totalFees: Number.isFinite(group.totalFees) ? group.totalFees : null, winRatePercent: group.wins / group.closedCount * 100, expectancyR: Number.isFinite(_sumR) ? _sumR / group.closedCount : null, profitFactor: _losses > 0 && Number.isFinite(_profits / _losses) ? _profits / _losses : null };
-  }).sort((a, b) => JSON.stringify([a.paperVersion, a.strategyVersion, a.setup, a.currency, a.basis]).localeCompare(JSON.stringify([b.paperVersion, b.strategyVersion, b.setup, b.currency, b.basis])));
+  }).sort((a, b) => JSON.stringify([a.paperVersion, a.strategyVersion, a.setup, a.currency, a.basis, a.holdingSessions, a.quantity, a.feePerOrder, a.slippageBps]).localeCompare(JSON.stringify([b.paperVersion, b.strategyVersion, b.setup, b.currency, b.basis, b.holdingSessions, b.quantity, b.feePerOrder, b.slippageBps])));
   return summary;
 }

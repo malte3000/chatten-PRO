@@ -1,7 +1,7 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
 
 export const STRATEGY_VERSION = "v0.2-readiness";
-export const READINESS_VERSION = "readiness-v0.4";
+export const READINESS_VERSION = "readiness-v0.5";
 export const normalizeTicker = (value) => String(value || "").trim().toUpperCase();
 const readinessDecision = (status, reasons, reason_codes) => ({ version: READINESS_VERSION, status, reasons, reason_codes });
 

@@ -1,4 +1,5 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
+import { getMarketStatus } from "../api/_market-hours.js";
 
 const DAY_MS = 86400000;
 const MARKET_CLOCKS = {
@@ -21,6 +22,17 @@ function zonedClock(now, timeZone) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
 }
 
+function previousTradingSession(market, sessionDate) {
+  let day = dateMillis(sessionDate);
+  for (let tries = 0; tries < 15; tries += 1) {
+    day -= DAY_MS;
+    const date = new Date(day).toISOString().slice(0, 10);
+    const reason = getMarketStatus(market, new Date(`${date}T12:00:00Z`)).reason;
+    if (reason !== "weekend" && reason !== "holiday") return date;
+  }
+  return null;
+}
+
 /**
  * Daily timestamps are exchange session dates, not UTC instants. Twelve Data
  * ignores timezone for 1day: https://twelvedata.com/docs (time_series timezone).
@@ -28,7 +40,7 @@ function zonedClock(now, timeZone) {
  * supply sessionDate explicitly and now after that session's close.
  * This is a five-calendar-day freshness cap, not a complete exchange calendar.
  */
-export function selectClosedDailyBars(data, { marketStatus, now = Date.now(), minBars = 60 } = {}) {
+export function selectClosedDailyBars(data, { marketStatus, now = Date.now(), minBars = 60, requireExpectedSession = false } = {}) {
   let sessionDate = null;
   const timeZone = data?.timezone || null;
   const invalid = (reason) => ({ valid: false, bars: [], reasons: [reason], sessionDate, latestDate: null, timeZone, excludedCurrentSession: false });
@@ -50,10 +62,9 @@ export function selectClosedDailyBars(data, { marketStatus, now = Date.now(), mi
     return invalid("Börsklockans öppetstatus och sessionsstatus motsäger varandra.");
   }
 
-  if (!Array.isArray(data?.bars) || !validateMarketBars(data.bars).valid) return invalid("Giltiga, unika och sorterade OHLC-candles saknas.");
-  if (data.bars.some((bar) => dateMillis(bar.datetime) === null)) return invalid("Dagskurserna kräver verkliga sessionsdatum i formatet YYYY-MM-DD.");
+  if (!Array.isArray(data?.bars)) return invalid("Giltiga, unika och sorterade OHLC-candles saknas.");
+  if (data.bars.some((bar) => dateMillis(bar?.datetime) === null)) return invalid("Dagskurserna kräver verkliga sessionsdatum i formatet YYYY-MM-DD.");
   if (data.bars.some((bar) => bar.datetime > sessionDate || bar.datetime > clock.date)) return invalid("Dagsdatan innehåller en framtida session.");
-  if (data.bars.some((bar) => !Number.isFinite(bar.volume) || bar.volume <= 0)) return invalid("Positiv och tillförlitlig volym krävs för varje dagskurs.");
 
   const weekday = new Date(`${sessionDate}T00:00:00Z`).getUTCDay();
   const weekend = weekday === 0 || weekday === 6;
@@ -63,11 +74,20 @@ export function selectClosedDailyBars(data, { marketStatus, now = Date.now(), mi
   const currentSessionClosed = !marketStatus.isOpen && !weekend && timeHasPassedClose && (reason === "after_close" || reason == null);
   // Remove only a candle stamped with this session's date. An open market does
   // not make yesterday's completed candle unfinished.
-  const bars = currentSessionClosed ? [...data.bars] : data.bars.filter((bar) => bar.datetime < sessionDate);
+  // The current session can have incomplete OHLC and zero volume. Validate
+  // only the completed candles used by the decision, as the scanner does.
+  const bars = currentSessionClosed ? [...data.bars] : data.bars.filter((bar) => bar.datetime !== sessionDate);
   const excludedCurrentSession = bars.length !== data.bars.length;
+  if (!validateMarketBars(bars).valid) return invalid("Giltiga, unika och sorterade OHLC-candles saknas.");
+  if (bars.some((bar) => !Number.isFinite(bar.volume) || bar.volume <= 0)) return invalid("Positiv och tillförlitlig volym krävs för varje dagskurs.");
   if (bars.length < minBars) return invalid(`Minst ${minBars} färdigställda dagscandles krävs.`);
   const latestDate = bars.at(-1).datetime;
   if ((dateMillis(clock.date) - dateMillis(latestDate)) / DAY_MS > 5) return invalid("Senaste färdigställda dagskursen är äldre än fem kalenderdagar.");
+  if (requireExpectedSession) {
+    if (reason == null) return invalid("Börsklockans sessionsstatus krävs för att bekräfta senaste dagskursen.");
+    const expected = reason === "after_close" ? sessionDate : previousTradingSession(marketStatus.market, sessionDate);
+    if (!expected || latestDate !== expected) return invalid(`Dagskursen för senaste avslutade handelssessionen ${expected || "okänd"} saknas.`);
+  }
 
   return {
     valid: true, bars, sessionDate, latestDate, timeZone, excludedCurrentSession,

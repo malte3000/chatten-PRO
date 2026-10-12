@@ -65,6 +65,59 @@ test("market data translates a provider timeout into a clear gateway timeout", a
   assert.match(res.data.message, /15 sekunder/);
 });
 
+test("daily provider data excludes an unfinished US candle before OHLC validation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T15:00:00Z") });
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  const dates = [];
+  let day = new Date("2026-09-25T00:00:00Z");
+  while (dates.length < 100) {
+    if (![0, 6].includes(day.getUTCDay())) dates.unshift(day.toISOString().slice(0, 10));
+    day = new Date(day.getTime() - 86400000);
+  }
+  const completed = dates.map((datetime, index) => {
+    const close = 100 + index;
+    return { datetime, open: String(close), high: String(close + 1), low: String(close - 1), close: String(close), volume: "1000000" };
+  });
+  const unfinished = { datetime: "2026-09-28", open: "200", high: "1", low: "199", close: "200", volume: "0" };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({
+    meta: { symbol: "AAPL", exchange: "NASDAQ", currency: "USD", exchange_timezone: "America/New_York", interval: "1day" },
+    values: [unfinished, ...completed.reverse()],
+  }) });
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "AAPL", exchange: "NASDAQ", interval: "1day" } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.data.validation.valid, true);
+  assert.equal(res.data.bars.length, 100);
+  assert.equal(res.data.latest.datetime, "2026-09-25");
+  assert.equal(res.data.price, 199);
+  assert.equal(res.data.excluded_current_session, true);
+});
+
+test("a malformed daily candle is rejected once the US session has closed", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T21:00:00Z") });
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({
+    meta: { symbol: "AAPL", exchange: "NASDAQ", currency: "USD", exchange_timezone: "America/New_York", interval: "1day" },
+    values: [{ datetime: "2026-09-28", open: "200", high: "1", low: "199", close: "200", volume: "0" }],
+  }) });
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "AAPL", interval: "1day" } }, res);
+  assert.equal(res.code, 502);
+  assert.equal(res.data.error, "Invalid market data");
+});
+
+test("market data quota failures remain 429", async (t) => {
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  globalThis.fetch = async () => ({ ok: false, status: 429, json: async () => ({ code: 429, message: "quota" }) });
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "AAPL", interval: "1day" } }, res);
+  assert.equal(res.code, 429);
+  assert.match(res.data.message, /kvot/);
+});
+
 test("news without actual search evidence remains unclear even when the model claims a direction", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-19T12:00:00Z") });
   const headers = setup(t);

@@ -1,6 +1,9 @@
 import { isAuthenticated } from "./_auth.js";
+import { getMarketStatus } from "./_market-hours.js";
 import { validateMarketBars } from "./_market-data-validation.js";
 import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
+
+const DAILY_MARKETS = { "America/New_York": "usa", "Europe/Stockholm": "stockholm" };
 const ALLOWED_INTERVALS = new Set([
   "1min",
   "5min",
@@ -90,6 +93,10 @@ export default async function handler(req, res) {
 
     const data = await readProviderJson(response);
 
+    if (response.status === 429 || Number(data?.code) === 429) {
+      return res.status(429).json({ error: "Market data quota reached", message: "Datakällans kvot är nådd. Försök igen senare." });
+    }
+
     if (!response.ok || !data || data?.status === "error") {
       return res.status(502).json({
         error: "Market data provider error",
@@ -108,7 +115,7 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Prisdata matchar inte vald aktie och börs." });
     }
 
-    const bars = data.values
+    const returnedBars = data.values
       .map((bar) => ({
         datetime: bar.datetime,
         open: toNumber(bar.open),
@@ -119,16 +126,23 @@ export default async function handler(req, res) {
       }))
       .reverse();
 
-    const latest = bars[bars.length - 1];
-const validation = validateMarketBars(bars);
+    const dailyMarket = interval === "1day" ? DAILY_MARKETS[data.meta?.exchange_timezone] : null;
+    const marketStatus = dailyMarket ? getMarketStatus(dailyMarket) : null;
+    const bars = marketStatus && marketStatus.reason !== "after_close"
+      ? returnedBars.filter((bar) => bar.datetime !== marketStatus.sessionDate)
+      : returnedBars;
+    const excludedCurrentSession = bars.length !== returnedBars.length;
 
-if (!validation.valid) {
-  return res.status(502).json({
-    error: "Invalid market data",
-    message: "Marknadsdatan innehåller ogiltiga candles.",
-    validation,
-  });
-}
+    const latest = bars[bars.length - 1];
+    const validation = validateMarketBars(bars);
+
+    if (!validation.valid) {
+      return res.status(502).json({
+        error: "Invalid market data",
+        message: "Marknadsdatan innehåller ogiltiga candles.",
+        validation,
+      });
+    }
     return res.status(200).json({
       source: "twelve_data",
       requested_ticker: ticker,
@@ -140,13 +154,12 @@ if (!validation.valid) {
       timezone: data.meta?.exchange_timezone || null,
       timestamp_timezone: interval === "1day" ? data.meta?.exchange_timezone || null : "UTC",
       timestamp_kind: interval === "1day" ? "exchange_session_date" : "utc_instant",
+      excluded_current_session: excludedCurrentSession,
       fetched_at: new Date().toISOString(),
-validation,
-
-price: latest?.close ?? null,
-latest,
-
-bars,
+      validation,
+      price: latest?.close ?? null,
+      latest,
+      bars,
     });
   } catch (error) {
     console.error("Market data error:", error);

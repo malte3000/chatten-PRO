@@ -205,6 +205,7 @@ export default function App() {
       if (version !== revision.current) return;
       const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
       const errors = responses[0].status === "rejected" ? [`Marknadsdata: ${responses[0].reason.message}`] : [];
+      if (responses[2].status === "rejected") errors.push(`Börsklocka: ${responses[2].reason.message}`);
       const analysis = {
         ticker: currentTicker, companyName: override?.name || null, horizon: horizonText, market,
         marketData: values[0], news: null, chart: values[1],
@@ -300,6 +301,7 @@ export default function App() {
         {result.strategy && <div className="border border-slate-800 rounded p-3 mt-3" aria-label="Experimentell swingbedömning">
           <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className="text-cyan-300">{result.strategy.status === "WATCH" ? "BEVAKA" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
           <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.join(" + ") : "ingen regel uppfylld"}</p>
+          {result.strategy.metrics?.latest_closed_candle && <p className="text-xs text-slate-400 mt-1">Bedömd stängd dagskurs: {result.strategy.metrics.latest_closed_candle}{result.marketData?.excluded_current_session ? " · dagens ofärdiga kurs uteslöts" : ""}.</p>}
           <ul className="text-sm mt-2 list-disc pl-5">{result.strategy.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           {result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}
           <p className="text-xs text-amber-300 mt-2">Bevakningen är oprövad och använder ännu inget referensfilter. Nivåerna och positionskalkylen är provisoriska och godkänner aldrig en trade.</p>

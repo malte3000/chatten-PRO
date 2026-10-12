@@ -1,7 +1,7 @@
 import { selectClosedDailyBars } from "./dailyBars.js";
 import { ema } from "./screening.js";
 
-export const SWING_STRATEGY_VERSION = "swing-v0.2-experimental";
+export const SWING_STRATEGY_VERSION = "swing-v0.3-experimental";
 
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -13,7 +13,7 @@ export function assessSwingSetup(marketData, { ticker, marketStatus, now = Date.
   const unavailable = (reason) => ({ version: SWING_STRATEGY_VERSION, status: "NOT_ASSESSED", setups: [], plans: [], metrics: null, reasons: [reason] });
   if (!marketStatus || marketStatus.market === "off") return unavailable("Marknadskontrollen saknar tillförlitlig börsklocka.");
   if (String(marketData?.ticker || "").trim().toUpperCase() !== String(ticker || "").trim().toUpperCase()) return unavailable("Marknadsdatan matchar inte den valda aktien.");
-  const selection = selectClosedDailyBars(marketData, { marketStatus, now });
+  const selection = selectClosedDailyBars(marketData, { marketStatus, now, requireExpectedSession: marketStatus.reason != null });
   if (!selection.valid) return unavailable(selection.reasons.join(" "));
   const bars = selection.bars;
   const latest = bars.at(-1);

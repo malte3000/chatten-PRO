@@ -22,7 +22,7 @@ AI-confidence används aldrig som uppgångssannolikhet. Ingen träffsäkerhet ä
 uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
 
-Från `readiness-v0.4` avgör validerad kursdata och den experimentella swingregeln
+Från `readiness-v0.5` avgör validerad kursdata och den experimentella swingregeln
 det övergripande beslutet. Nyheter påverkar inte AVVAKTA/NO TRADE. Regeln
 `WATCH` kan högst ge AVVAKTA;
 `NO_SETUP` och `NOT_ASSESSED` ger NO TRADE med skilda orsakskoder.
@@ -38,10 +38,13 @@ visa provisorisk ATR-stop, 2R-målnivå och en kalkyl av högsta hela aktieantal
 från användarens eget kapital och riskprocent. Detta är inte en validerad
 Risk Engine och kan inte godkänna TRADE.
 
-`swing-v0.2-experimental` kontrollerar börsens tidszon och verkliga sessionsdatum.
+`swing-v0.3-experimental` kontrollerar börsens tidszon och verkliga sessionsdatum.
 Dagens ofärdiga dagsljus tas bort; gårdagens behålls även om börsen är öppen.
-Alla använda dagsljus kräver positiv volym. Färskhetsgränsen är fem kalenderdagar,
-inte en fullständig kontroll av saknade handelssessioner.
+Alla använda dagsljus kräver positiv volym. Dagens ofärdiga ljus utesluts före
+OHLC-/volymvalidering i både skanner och manuell analys. Live-swingbedömningen
+kräver kursen från senast avslutade handelssession enligt börsklockan; annars
+blir den ej bedömd. Det generella dagsdataurvalet har dessutom en gräns på fem
+kalenderdagar, men verifierar inte alla saknade äldre sessioner.
 
 Valfri nyhetsanalys kan köras även utanför öppettider, men den ingår inte i
 beslutet och körs inte automatiskt av skannern. Ett nyhetsfel fördröjer inte
@@ -72,7 +75,7 @@ Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
 Gemensamma försöksfilter är pris > EMA20 > EMA50, positivt fem-candle-momentum,
 ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
-Swing (`v0.5-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
+Swing (`v0.6-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
 EMA20 eller ett utbrott över föregående 20 dagars högsta med minst 1,2 gånger
 medianvolymen. Pullback kräver inte förhöjd dagsvolym. Bara färdigställda
 dagskurser enligt börsens klocka används. Daytrade kräver RVOL >= 1 och
@@ -228,6 +231,9 @@ olika previewdomäner. JSON-export ger en kopia som kan importeras på en annan
 dator. Olika poster med samma ID skrivs inte över vid import. Det är en
 experimentell, lokalt redigerbar logg, ingen verifierad revisionskedja eller
 grund för att låsa upp TRADE.
+Paperstatistiken håller olika antaganden om max innehavstid, aktieantal,
+avgift och slippage åtskilda. Håll antagandena fasta under ett paperprov och
+exportera en JSON-kopia efter varje ny observation och uppföljning.
 
 **Inloggningen använder ett gemensamt lösenord; journalen är gemensam.**
 Personlig historik kräver riktig användaridentitet, databasägarskap och

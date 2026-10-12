@@ -6,8 +6,9 @@ function createMockApi() {
   const saved = [];
   const newsRequests = [];
   let marketStatusFails = false;
+  let paperPhase = null;
   function dailyBars() {
-    const lastDate = new Date();
+    const lastDate = paperPhase === null ? new Date() : new Date("2026-09-29T12:00:00Z");
     lastDate.setUTCHours(0, 0, 0, 0);
     lastDate.setUTCDate(lastDate.getUTCDate() - 1);
     const dates = [];
@@ -22,6 +23,10 @@ function createMockApi() {
     });
     bars[79].low = 119.8;
     bars[99].low = 139.8;
+    if (paperPhase === "followup") {
+      bars.shift();
+      bars.push({ datetime: "2026-09-29", open: 149.7, high: 150.5, low: 149.5, close: 150, volume: 1000000 });
+    }
     return bars;
   }
   function handleApi({ pathname, method = "GET", body: input = {}, searchParams = new URLSearchParams() }) {
@@ -47,7 +52,8 @@ function createMockApi() {
       const bars = dailyBars();
       return { status: 200, body: {
         ticker, requested_ticker: ticker, exchange: searchParams.get("exchange") || "NASDAQ", currency: "USD",
-        interval: searchParams.get("interval") || "1day", timezone: "America/New_York", fetched_at: new Date().toISOString(),
+        interval: searchParams.get("interval") || "1day", timezone: "America/New_York",
+        fetched_at: paperPhase === null ? new Date().toISOString() : paperPhase === "signal" ? "2026-09-28T21:00:00.000Z" : "2026-09-29T21:00:00.000Z",
         validation: { valid: true }, bars, latest: bars.at(-1), price: bars.at(-1).close,
       } };
     }
@@ -98,7 +104,7 @@ function createMockApi() {
     }
     return { status: 404, body: { error: "Ingen mock finns för denna API-route." } };
   }
-  return { saved, newsRequests, handleApi, setMarketStatusFailure: (value) => { marketStatusFails = value; } };
+  return { saved, newsRequests, handleApi, setMarketStatusFailure: (value) => { marketStatusFails = value; }, setPaperPhase: (value) => { paperPhase = value; } };
 }
 
 async function runSmoke() {
@@ -112,14 +118,15 @@ async function runSmoke() {
     page.on("pageerror", (error) => errors.push(error.message));
     const mock = createMockApi();
     const { saved, newsRequests } = mock;
-    await page.route("**/api/**", async (route) => {
+    const routeMockApi = async (target, mockApi) => target.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       if (url.pathname.endsWith(".js")) { await route.continue(); return; }
       const input = request.postData() ? request.postDataJSON() : {};
-      const { status, body } = mock.handleApi({ pathname: url.pathname, method: request.method(), body: input, searchParams: url.searchParams });
+      const { status, body } = mockApi.handleApi({ pathname: url.pathname, method: request.method(), body: input, searchParams: url.searchParams });
       await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     });
+    await routeMockApi(page, mock);
     await page.goto(process.env.TEST_URL || "http://127.0.0.1:5173");
     try { await page.getByRole("heading", { name: "Sannolikhetsterminal", exact: true }).waitFor({ timeout: 10000 }); }
     catch (error) { console.log("UI diagnostics:", await page.locator("body").innerText(), errors); throw error; }
@@ -139,7 +146,7 @@ async function runSmoke() {
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
     assert.equal(saved[0].signal_inputs.record_type, "SCAN");
     assert.equal(saved[0].signal_inputs.checked, 5);
-    assert.equal(saved[0].strategy_version, "v0.5-experimental");
+    assert.equal(saved[0].strategy_version, "v0.6-experimental");
     assert.equal(saved[0].signal_inputs.scan_decision_policy, "TECHNICAL_ONLY");
     assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "WAIT").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
     assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical watch candidates");
@@ -268,8 +275,53 @@ async function runSmoke() {
     await page.getByRole("region", { name: "Samlad analys" }).getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
     await page.getByRole("region", { name: "Samlad analys" }).getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
     assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+
+    const paperPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    paperPage.on("pageerror", (error) => errors.push(error.message));
+    const paperMock = createMockApi();
+    paperMock.setPaperPhase("signal");
+    await paperPage.clock.install({ time: new Date("2026-09-28T21:00:00Z") });
+    await routeMockApi(paperPage, paperMock);
+    await paperPage.goto(process.env.TEST_URL || "http://127.0.0.1:5173");
+    await paperPage.getByRole("heading", { name: "Sannolikhetsterminal", exact: true }).waitFor();
+    await paperPage.getByLabel("Tidshorisont").selectOption("week");
+    await paperPage.getByLabel("Marknad (välj aktiens börs)").selectOption("usa");
+    await paperPage.getByRole("navigation", { name: "Analysläge" }).getByRole("button", { name: "Analysera en aktie" }).click();
+    await paperPage.getByRole("textbox", { name: "Aktie / ticker" }).fill("NVDA");
+    await paperPage.getByRole("button", { name: "Starta analys" }).click();
+    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+    const paperJournal = paperPage.getByRole("region", { name: "Paperlogg" });
+    await paperJournal.getByText("Spara teknisk BEVAKA-kandidat lokalt", { exact: true }).click();
+    await paperJournal.getByLabel("Max observerade sessioner").selectOption("1");
+    await paperJournal.getByLabel("Fast simulerat aktieantal").fill("2");
+    await paperJournal.getByLabel("Avgift per order (USD)").fill("1");
+    await paperJournal.getByLabel("Slippage i baspunkter").fill("10");
+    await paperJournal.getByRole("button", { name: "Spara paperobservation" }).click();
+    await paperJournal.getByText("Det tekniska upplägget är låst och sparat lokalt.", { exact: false }).waitFor();
+    const readPaper = () => paperPage.evaluate(() => JSON.parse(localStorage.getItem("sannolikhet-paper-observations-v1")).records);
+    const [captured] = await readPaper();
+    assert.equal(captured.status, "PENDING_ENTRY");
+    assert.equal(captured.signalDate, "2026-09-28");
+    assert.equal(captured.sourceDecisionStatus, "WAIT");
+    assert.equal(captured.holdingSessions, 1);
+    assert.equal(captured.feePerOrder, 1);
+    assert.equal(captured.slippageBps, 10);
+
+    paperMock.setPaperPhase("followup");
+    await paperPage.clock.setFixedTime(new Date("2026-09-29T21:00:00Z"));
+    await paperPage.getByRole("button", { name: "Starta analys" }).click();
+    await paperJournal.getByText(/1 observationer · 1 avslutade/).waitFor();
+    const [settled] = await readPaper();
+    assert.equal(settled.id, captured.id);
+    assert.equal(settled.status, "CLOSED");
+    assert.equal(settled.entryDate, "2026-09-29");
+    assert.equal(settled.exitDate, "2026-09-29");
+    assert.equal(settled.holdingBars, 1);
+    assert.equal(settled.exitReason, "TIME_EXIT");
+    assert.ok(Number.isFinite(settled.netPnl));
+    assert.ok(Number.isFinite(settled.resultR));
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
+    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, paper save/settle, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
   } finally { await browser.close(); }
 }
 

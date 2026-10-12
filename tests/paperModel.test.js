@@ -69,15 +69,15 @@ test("historical v0.1 and v0.2 records remain valid and outcome groups separate 
   const analysis = fixture();
   const current = createPaperObservation(analysis, options);
   const oldTechnical = {
-    ...current, version: "paper-forward-v0.2", sourceDecisionStatus: "NO_TRADE",
+    ...current, version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", sourceDecisionStatus: "NO_TRADE",
     sourceAnalysisTradeId: "TEST-old-technical", id: "paper:TEST-old-technical:BREAKOUT",
   };
   const oldWithNews = {
-    ...current, version: "paper-forward-v0.2", basis: PAPER_BASIS.WITH_NEWS,
+    ...current, version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", basis: PAPER_BASIS.WITH_NEWS,
     sourceAnalysisTradeId: "TEST-old-news", id: "paper:TEST-old-news:BREAKOUT",
   };
   const legacy = {
-    ...current, version: "paper-forward-v0.1",
+    ...current, version: "paper-forward-v0.1", strategyVersion: "swing-v0.2-experimental",
     sourceAnalysisTradeId: "TEST-legacy", id: "paper:TEST-legacy:BREAKOUT",
   };
   delete legacy.basis;
@@ -107,7 +107,7 @@ test("a NO TRADE decision cannot be captured as a new paper observation, even fo
 });
 
 test("a captured v0.2 paper record remains a readable historical version after a future strategy bump", () => {
-  const record = { ...createPaperObservation(fixture(), options), version: "paper-forward-v0.2", sourceDecisionStatus: "NO_TRADE" };
+  const record = { ...createPaperObservation(fixture(), options), version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", sourceDecisionStatus: "NO_TRADE" };
   assert.equal(record.strategyVersion, "swing-v0.2-experimental");
   assert.ok(validatePaperObservation(record));
   assert.equal(supportsPaperStrategyVersion(record.strategyVersion, "swing-v0.3-experimental"), true);
@@ -266,4 +266,22 @@ test("summary excludes pending and invalid records and keeps currencies in separ
   assert.equal(summary.groups.length, 2);
   assert.deepEqual(summary.groups.map((group) => group.currency).sort(), ["SEK", "USD"]);
   assert.ok(summary.groups.every((group) => group.closedCount === 1));
+});
+
+test("paper summaries keep different holding periods and cost assumptions separate", () => {
+  const firstAnalysis = fixture();
+  const secondAnalysis = fixture();
+  secondAnalysis.record.trade_id = "TEST-analysis-2";
+  const followup = later(firstAnalysis,
+    day(tuesday, 149.7, 150.5, 149.5, 150),
+    day(wednesday, 150.7, 151.5, 150.5, 151));
+  const first = settlePaperObservation(createPaperObservation(firstAnalysis, { ...options, holdingSessions: 1 }), followup, { now: closeTime(wednesday) });
+  const second = settlePaperObservation(createPaperObservation(secondAnalysis, { ...options, holdingSessions: 2, quantity: 3, feePerOrder: 2, slippageBps: 20 }), followup, { now: closeTime(wednesday) });
+  const summary = summarizePaperObservations([first, second]);
+  assert.equal(summary.closedCount, 2);
+  assert.equal(summary.groups.length, 2);
+  assert.deepEqual(summary.groups.map((group) => [group.holdingSessions, group.quantity, group.feePerOrder, group.slippageBps]), [
+    [1, 2, 1, 10],
+    [2, 3, 2, 20],
+  ]);
 });

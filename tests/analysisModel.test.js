@@ -13,7 +13,7 @@ const input = { ticker: "NVDA", marketData, news: null, strategy };
 test("swing WATCH without news is a technical WAIT candidate, never TRADE", () => {
   const decision = evaluateReadiness(input);
   assert.equal(decision.status, "WAIT");
-  assert.equal(decision.version, "readiness-v0.4");
+  assert.equal(decision.version, "readiness-v0.5");
   assert.deepEqual(decision.reason_codes, ["SWING_WATCH_UNVALIDATED"]);
   assert.match(decision.reasons[0], /Nyheter ingår inte/);
   assert.match(decision.reasons[1], /TRADE är spärrat/);

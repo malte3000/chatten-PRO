@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import handler from "../api/scan.js";
+import { getMarketStatus } from "../api/_market-hours.js";
 
 function response() { return { code: 200, headers: {}, setHeader(key, value) { this.headers[key] = value; }, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } }; }
 function setup(t) {
@@ -68,6 +69,15 @@ test("Swedish scan excludes obvious products and separates valid candidates from
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 120000 });
   const headers = setup(t);
   const clock = Date.now();
+  const status = getMarketStatus("stockholm", new Date(clock));
+  let day = Date.parse(`${status.sessionDate}T00:00:00Z`);
+  if (status.reason !== "after_close") day -= 86400000;
+  const dates = [];
+  while (dates.length < 100) {
+    const date = new Date(day).toISOString().slice(0, 10);
+    if (!["weekend", "holiday"].includes(getMarketStatus("stockholm", new Date(`${date}T12:00:00Z`)).reason)) dates.unshift(date);
+    day -= 86400000;
+  }
   globalThis.fetch = async (url) => {
     const request = new URL(url);
     if (request.pathname === "/stocks") return { ok: true, json: async () => ({ data: [
@@ -77,9 +87,9 @@ test("Swedish scan excludes obvious products and separates valid candidates from
       { symbol: "MINI.L.WDC.AVA.01", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "SEK", type: "Common Stock" },
     ] }) };
     assert.deepEqual(new Set(request.searchParams.get("symbol").split(",")), new Set(["DEMO:OMX", "OTHER:OMX"]));
-    const values = Array.from({ length: 100 }, (_, index) => {
+    const values = dates.map((datetime, index) => {
       const close = 50 + index;
-      return { datetime: new Date(clock - (100 - index) * 86400000).toISOString().slice(0, 10), open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(index === 99 ? close + 0.5 : close), volume: index === 99 ? "2000000" : "1000000" };
+      return { datetime, open: String(close - 0.5), high: String(close + 1), low: String(close - 1), close: String(index === 99 ? close + 0.5 : close), volume: index === 99 ? "2000000" : "1000000" };
     }).reverse();
     return { ok: true, json: async () => ({
       "DEMO:OMX": { meta: { symbol: "DEMO", exchange: "OMX", currency: "SEK", exchange_timezone: "Europe/Stockholm" }, values },
