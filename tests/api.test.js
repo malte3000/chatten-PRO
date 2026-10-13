@@ -4,11 +4,12 @@ import crypto from "node:crypto";
 import newsHandler from "../api/analyze-news.js";
 import imageHandler from "../api/analyze-image.js";
 import marketDataHandler from "../api/market-data.js";
+import marketStatusHandler from "../api/market-status.js";
 import tradesHandler from "../api/trades.js";
 import { createAnalysisRecord, createRealTradeRecord } from "../src/analysisModel.js";
 
 function response() {
-  return { code: 200, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
+  return { code: 200, headers: {}, setHeader(key, value) { this.headers[key] = value; }, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
 }
 
 function setup(t) {
@@ -62,7 +63,16 @@ test("market data translates a provider timeout into a clear gateway timeout", a
   const res = response();
   await marketDataHandler({ method: "GET", headers, query: { ticker: "NVDA", interval: "1day" } }, res);
   assert.equal(res.code, 504);
+  assert.equal(res.headers["Cache-Control"], "no-store");
   assert.match(res.data.message, /15 sekunder/);
+});
+
+test("exchange clock is never cached", () => {
+  const res = response();
+  marketStatusHandler({ method: "GET", query: { market: "usa" } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.headers["Cache-Control"], "no-store");
+  assert.equal(res.data.market, "usa");
 });
 
 test("daily provider data excludes an unfinished US candle before OHLC validation", async (t) => {

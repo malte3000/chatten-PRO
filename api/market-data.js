@@ -19,6 +19,7 @@ function toNumber(value) {
 }
 
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
   if (!isAuthenticated(req)) {
     return res.status(401).json({
       error: "Unauthorized",

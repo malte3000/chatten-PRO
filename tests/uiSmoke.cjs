@@ -58,6 +58,11 @@ function createMockApi() {
       } };
     }
     if (pathname === "/api/market-status" && marketStatusFails) return { status: 502, body: { error: "Simulerat börsklocksfel" } };
+    if (pathname === "/api/market-status" && paperPhase !== null) return { status: 200, body: {
+      market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
+      reason: "after_close", sessionDate: paperPhase === "signal" ? "2026-09-28" : "2026-09-29",
+      timeZone: "America/New_York", earlyClose: false,
+    } };
     if (pathname === "/api/market-status") return { status: 200, body: {
       market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
     } };
@@ -171,6 +176,7 @@ async function runSmoke() {
     assert.equal(saved[0].winner, null);
     const result = page.getByRole("region", { name: "Samlad analys" });
     await result.getByText("BEVAKA", { exact: true }).waitFor();
+    await result.locator('[aria-label="Datakontroll för swing"]').getByText(/Senaste levererade dagskurs:/).waitFor();
     assert.equal(saved[0].signal_inputs.strategy.status, "WATCH");
     assert.equal(saved[0].signal_inputs.news_requested, false);
     assert.deepEqual(newsRequests, []);
@@ -244,7 +250,9 @@ async function runSmoke() {
       assert.equal(saved[0].signal_inputs.strategy.status, failedTicker === "FAIL" ? "WATCH" : "NOT_ASSESSED");
       if (failedTicker === "FAILDATA") {
         assert.deepEqual(saved[0].signal_inputs.strategy.plans, []);
-        await page.getByRole("region", { name: "Samlad analys" }).getByText("EJ BEDÖMT", { exact: true }).waitFor();
+        const failedAnalysis = page.getByRole("region", { name: "Samlad analys" });
+        await failedAnalysis.locator('[aria-label="Datakontroll för swing"]').getByText("Marknadsdata saknas. Se felorsaken ovan.").waitFor();
+        await failedAnalysis.locator('[aria-label="Experimentell swingbedömning"]').getByText("EJ BEDÖMT", { exact: true }).waitFor();
       } else {
         assert.ok(saved[0].signal_inputs.strategy.plans.length > 0);
         await page.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
@@ -272,6 +280,7 @@ async function runSmoke() {
     await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
     assert.equal(saved[0].signal_inputs.strategy.status, "NOT_ASSESSED");
     assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    await page.getByRole("region", { name: "Samlad analys" }).locator('[aria-label="Datakontroll för swing"]').getByText("Börsklockan kunde inte verifieras. Se felorsaken ovan.").waitFor();
     await page.getByRole("region", { name: "Samlad analys" }).getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
     await page.getByRole("region", { name: "Samlad analys" }).getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
     assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
@@ -307,8 +316,17 @@ async function runSmoke() {
     assert.equal(captured.feePerOrder, 1);
     assert.equal(captured.slippageBps, 10);
 
-    paperMock.setPaperPhase("followup");
+    paperMock.setPaperPhase("stale");
     await paperPage.clock.setFixedTime(new Date("2026-09-29T21:00:00Z"));
+    await paperPage.getByRole("button", { name: "Starta analys" }).click();
+    const staleAnalysis = paperPage.getByRole("region", { name: "Samlad analys" });
+    await staleAnalysis.getByText("NO TRADE · EJ BEDÖMT", { exact: true }).waitFor();
+    await staleAnalysis.locator('[aria-label="Datakontroll för swing"]').getByText(/Senaste levererade dagskurs: 2026-09-28/).waitFor();
+    await staleAnalysis.locator('[aria-label="Datakontroll för swing"]').getByText("EJ BEDÖMT", { exact: true }).waitFor();
+    assert.equal(paperMock.saved[0].signal_inputs.decision.status, "NO_TRADE");
+    assert.equal((await readPaper())[0].status, "NOT_ASSESSED");
+
+    paperMock.setPaperPhase("followup");
     await paperPage.getByRole("button", { name: "Starta analys" }).click();
     await paperJournal.getByText(/1 observationer · 1 avslutade/).waitFor();
     const [settled] = await readPaper();
@@ -321,7 +339,7 @@ async function runSmoke() {
     assert.ok(Number.isFinite(settled.netPnl));
     assert.ok(Number.isFinite(settled.resultR));
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, paper save/settle, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
+    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, stale-session diagnostics, paper save/settle, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
   } finally { await browser.close(); }
 }
 

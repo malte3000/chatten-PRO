@@ -25,6 +25,33 @@ function Details({ title, children }) {
   </details>;
 }
 
+const MARKET_CLOCK_LABELS = {
+  open: "öppen",
+  after_close: "stängd efter dagens handel",
+  before_open: "ännu inte öppen",
+  weekend: "helgstängd",
+  holiday: "helgdagsstängd",
+};
+
+function SwingDataCheck({ result }) {
+  const { marketData, marketStatus, strategy } = result;
+  const latestDate = marketData?.latest?.datetime || marketData?.bars?.at(-1)?.datetime || null;
+  return <div className="border border-slate-800 rounded p-3 mt-3 text-sm" aria-label="Datakontroll för swing">
+    <div className="flex justify-between gap-3"><h3 className="font-semibold">Datakontroll</h3><span className={strategy.status === "NOT_ASSESSED" ? "text-amber-300" : "text-slate-300"}>{strategy.status === "NOT_ASSESSED" ? "EJ BEDÖMT" : "BEDÖMD"}</span></div>
+    {marketData
+      ? <>
+        <p className="mt-1">Senaste levererade dagskurs: <strong>{latestDate || "saknas"}</strong>{marketData.exchange ? ` · ${marketData.exchange}` : ""}.</p>
+        {marketData.excluded_current_session && <p className="text-slate-400">Dagens ofärdiga dagskurs uteslöts.</p>}
+        {marketData.fetched_at && <p className="text-slate-400">Data hämtad: {marketData.fetched_at}.</p>}
+      </>
+      : <p className="mt-1 text-amber-300">Marknadsdata saknas. Se felorsaken ovan.</p>}
+    {marketStatus
+      ? <p className="text-slate-400">Börsklocka: {MARKET_CLOCK_LABELS[marketStatus.reason] || marketStatus.label || "status okänd"}{marketStatus.sessionDate ? ` · lokalt börsdatum ${marketStatus.sessionDate}` : ""}.</p>
+      : <p className="text-amber-300">{result.market === "off" ? "Marknadskontrollen är av; swingupplägget bedöms inte." : "Börsklockan kunde inte verifieras. Se felorsaken ovan."}</p>}
+    {strategy.status === "NOT_ASSESSED" && <p className="text-amber-300 mt-1">Regeln kunde inte bedöma detta underlag; NO TRADE är ett säkerhetsbeslut, inte ett testat negativt upplägg.</p>}
+  </div>;
+}
+
 function RealTradeForm({ analysis, onSave }) {
   const [direction, setDirection] = useState("LONG");
   const [entry, setEntry] = useState("");
@@ -196,10 +223,10 @@ export default function App() {
     const post = (url, body) => request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.signal });
     try {
       const responses = await Promise.allSettled([
-        request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal }),
+        request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal, cache: "no-store" }),
         !override && image ? post("/api/analyze-image", { ticker: currentTicker, imageBase64: image.base64, imageMediaType: image.type, market }) : Promise.resolve(null),
         horizon === "week" && ["usa", "stockholm"].includes(market)
-          ? request(`/api/market-status?market=${encodeURIComponent(market)}`, { signal: abort.signal })
+          ? request(`/api/market-status?market=${encodeURIComponent(market)}`, { signal: abort.signal, cache: "no-store" })
           : Promise.resolve(null),
       ]);
       if (version !== revision.current) return;
@@ -208,7 +235,7 @@ export default function App() {
       if (responses[2].status === "rejected") errors.push(`Börsklocka: ${responses[2].reason.message}`);
       const analysis = {
         ticker: currentTicker, companyName: override?.name || null, horizon: horizonText, market,
-        marketData: values[0], news: null, chart: values[1],
+        marketData: values[0], marketStatus: values[2], news: null, chart: values[1],
         newsRequested: false, newsError: null,
         strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[2] }) : null,
       };
@@ -296,8 +323,9 @@ export default function App() {
       }} />}
       {notice && <p role="status" className="text-sm text-amber-300">{notice}</p>}
       {result && <section className="border border-cyan-900 rounded-lg p-4" aria-label="Samlad analys">
-        <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className="text-cyan-300 font-bold">{LABELS[result.decision.status]}</span></div>
+        <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className="text-cyan-300 font-bold">{LABELS[result.decision.status]}{result.strategy?.status === "NOT_ASSESSED" ? " · EJ BEDÖMT" : ""}</span></div>
         <ul className="text-sm text-slate-300 mt-3 space-y-1 list-disc pl-5">{result.decision.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+        {result.strategy && <SwingDataCheck result={result} />}
         {result.strategy && <div className="border border-slate-800 rounded p-3 mt-3" aria-label="Experimentell swingbedömning">
           <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className="text-cyan-300">{result.strategy.status === "WATCH" ? "BEVAKA" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
           <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.join(" + ") : "ingen regel uppfylld"}</p>

@@ -45,6 +45,10 @@ OHLC-/volymvalidering i både skanner och manuell analys. Live-swingbedömningen
 kräver kursen från senast avslutade handelssession enligt börsklockan; annars
 blir den ej bedömd. Det generella dagsdataurvalet har dessutom en gräns på fem
 kalenderdagar, men verifierar inte alla saknade äldre sessioner.
+Den manuella analysen visar leverantörens senaste kursdatum, börsklockans status
+och hämtningstid även när upplägget blir EJ BEDÖMT. Ett datafel går därmed att
+skilja från ett bedömt NO TRADE utan upplägg. Kursdata och börsklocka hämtas
+utan cache eftersom dagens status kan ändras under testet.
 
 Valfri nyhetsanalys kan köras även utanför öppettider, men den ingår inte i
 beslutet och körs inte automatiskt av skannern. Ett nyhetsfel fördröjer inte
