@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
+import PaperCloudPanel from "./PaperCloudPanel.jsx";
+import { resolvePaperCloudConfig } from "./paperCloudClient.js";
 import { PAPER_BASIS, createPaperObservation, paperObservationBasis, settlePaperObservation, summarizePaperObservations } from "./paperModel.js";
 import { PAPER_STORAGE_KEY, decodePaperLog, encodePaperLog, loadPaperLog, mergePaperLogs, updatePaperLog } from "./paperStorage.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
 const LABELS = { PENDING_ENTRY: "Väntar på framtida dagskurs", PENDING_OPEN: "Öppen simulering", REJECTED_ENTRY: "Ingång avvisad", CLOSED: "Simulerat avslutad", NOT_ASSESSED: "Kan inte bedömas med nuvarande data" };
+const CLOUD_ENABLED = resolvePaperCloudConfig().enabled;
 const formatted = (value) => Number.isFinite(value) ? value.toLocaleString("sv-SE", { maximumFractionDigits: 2 }) : "—";
 
 function initialState() {
@@ -110,7 +113,9 @@ export default function PaperJournal({ latestAnalysis }) {
   const summary = summarizePaperObservations(state.records);
   return <section className="border border-slate-800 rounded-lg p-4 space-y-3" aria-label="Paperlogg">
     <h2 className="font-semibold">Paperlogg · experimentell</h2>
-    <p className="text-xs text-slate-400">Paperobservationer sparas bara i den här webbläsaren på denna preview-adress. De synkas inte mellan datorer eller till Supabase. Exportera en JSON-kopia för att flytta eller säkerhetskopiera loggen.</p>
+    <p className="text-xs text-slate-400">{CLOUD_ENABLED
+      ? "Paperobservationer sparas först i den här webbläsaren. Logga in i ett personligt paperkonto och tryck Synka för att föra över dem mellan datorer. Exportera gärna en JSON-kopia som backup."
+      : "Paperobservationer sparas bara i den här webbläsaren på denna preview-adress. De synkas inte mellan datorer eller till Supabase. Exportera en JSON-kopia för att flytta eller säkerhetskopiera loggen."}</p>
     <p className="text-xs text-amber-300">En paperobservation är en förhandslåst simulering, ingen TRADE-signal eller riktig order. Endast avslutade simuleringar får ett vinst- eller förlustutfall; NO TRADE räknas aldrig som vinst.</p>
     {candidate && <details className="border-t border-slate-800 pt-3">
       <summary className="cursor-pointer text-cyan-300">{technicalOnly ? "Spara teknisk BEVAKA-kandidat lokalt" : "Spara aktuell BEVAKA-kandidat lokalt"}</summary>
@@ -130,6 +135,7 @@ export default function PaperJournal({ latestAnalysis }) {
       <button className={CONTROL} onClick={exportLog} disabled={!state.records.length}>Exportera JSON-kopia</button>
       <label className="text-slate-300">Importera JSON-kopia<input ref={importInput} className="block mt-1 text-xs" type="file" accept=".json,application/json" onChange={importLog} disabled={Boolean(state.storageError)} /></label>
     </div>
+    <PaperCloudPanel onSynced={(records) => setState({ records, storageError: "" })} />
     {state.storageError && <p role="alert" className="text-red-300 text-sm">{state.storageError}</p>}
     {error && <p role="alert" className="text-red-300 text-sm">{error}</p>}
     {notice && <p role="status" className="text-cyan-300 text-sm">{notice}</p>}

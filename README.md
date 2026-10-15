@@ -235,6 +235,31 @@ olika previewdomäner. JSON-export ger en kopia som kan importeras på en annan
 dator. Olika poster med samma ID skrivs inte över vid import. Det är en
 experimentell, lokalt redigerbar logg, ingen verifierad revisionskedja eller
 grund för att låsa upp TRADE.
+
+En personlig molnsynk finns i koden men är **avstängd som standard**. Den får
+aktiveras först med ett separat Supabase-testprojekt; previewn läser ännu från
+samma projekt som den gemensamma journalen och dess skrivskydd gäller inte
+direkta anrop från webbläsaren till en ny tabell. SQL-designen i
+[`supabase/paper_sync_schema.sql`](supabase/paper_sync_schema.sql) är inte
+tillämpad. Befintliga `trades` och lokala paperfiler påverkas inte.
+
+För att testa synken: skapa ett isolerat projekt, konfigurera e-postinloggning
+och tillåt preview-adressen som Auth redirect, tillämpa SQL-designen där och
+verifiera med två olika användarkonton att ingen kan läsa eller ändra den
+andras poster. Aktivera därefter `VITE_PAPER_CLOUD_ENABLED=true` tillsammans
+med **det isolerade projektets** `VITE_PAPER_SUPABASE_URL` och
+`VITE_PAPER_SUPABASE_PUBLISHABLE_KEY` vid Vite-bygget och publicera en ny
+preview. Inga serverhemligheter får användas i `VITE_`-variabler.
+Standardutskicket för Auth kan kräva egen SMTP för e-postadresser utanför
+projektets team ([Supabase Auth SMTP](https://supabase.com/docs/guides/auth/auth-smtp)).
+
+Synk görs manuellt efter personlig inloggning. Lokal logg och molnlogg
+jämförs före skrivning; motstridiga låsta signaler eller slututfall stoppar
+synken utan att skriva över dem. Äldre lokala observationer märks som
+`local_import`. Import av ett redan avslutat utfall sker i två steg och kan
+behöva upprepas om nätet bryts mellan stegen. Även nya webbläsarobservationer
+är klientdata, inte serververifierade handelsutfall. Ingen synkad post får
+användas som verifierad träffsäkerhet eller för att låsa upp TRADE.
 Paperstatistiken håller olika antaganden om max innehavstid, aktieantal,
 avgift och slippage åtskilda. Håll antagandena fasta under ett paperprov och
 exportera en JSON-kopia efter varje ny observation och uppföljning.
