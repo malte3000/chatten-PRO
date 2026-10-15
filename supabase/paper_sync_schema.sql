@@ -1,9 +1,9 @@
--- DESIGN ONLY: Do not apply this file to the existing Supabase project yet.
--- The current preview and production configuration may share a Supabase project.
--- Create a separate test project, configure personal Supabase Auth there, and
--- verify isolation with two distinct users before any production migration.
+-- Apply only to an isolated paper-sync test project. This design was applied to
+-- project bcvcwrtfxlwqbntnibtk, not the existing shared journal project.
+-- The current preview and production server configuration may still share the
+-- older project. Verify isolation before any future production migration.
 -- Keep public.trades and the browser's existing paper JSON exports untouched.
--- This is not a migration file and is intentionally not part of migration history.
+-- This reference file is not part of the repository's migration history.
 
 -- A row has two parts: the initial, immutable capture and later simulation
 -- progress. Application code must split the current paper record accordingly.
@@ -115,6 +115,21 @@ $$;
 create trigger paper_observations_guard_write_trigger
   before insert or update on public.paper_observations
   for each row execute function public.paper_observations_guard_write();
+
+-- Trigger functions need not be directly callable through the Data API.
+revoke execute on function public.paper_observations_guard_write()
+  from public, anon, authenticated;
+
+-- The dashboard's optional automatic-RLS setting creates this SECURITY DEFINER
+-- event-trigger function in the exposed public schema. Revoke direct API access
+-- when present; the event trigger still runs on future CREATE TABLE commands.
+do $$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end;
+$$;
 
 -- Before treating synced data as verified outcomes or releasing beyond an
 -- isolated test project, add a trusted server path that validates the selected

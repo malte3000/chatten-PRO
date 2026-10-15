@@ -236,20 +236,28 @@ dator. Olika poster med samma ID skrivs inte över vid import. Det är en
 experimentell, lokalt redigerbar logg, ingen verifierad revisionskedja eller
 grund för att låsa upp TRADE.
 
-En personlig molnsynk finns i koden men är **avstängd som standard**. Den får
-aktiveras först med ett separat Supabase-testprojekt; previewn läser ännu från
-samma projekt som den gemensamma journalen och dess skrivskydd gäller inte
-direkta anrop från webbläsaren till en ny tabell. SQL-designen i
-[`supabase/paper_sync_schema.sql`](supabase/paper_sync_schema.sql) är inte
-tillämpad. Befintliga `trades` och lokala paperfiler påverkas inte.
+En personlig molnsynk finns i koden och är **avstängd som standard** i nya
+miljöer. Ett separat Supabase Free-testprojekt, `chatten-pro-paper-sync-test`
+(`bcvcwrtfxlwqbntnibtk`), har fått tabellen i
+[`supabase/paper_sync_schema.sql`](supabase/paper_sync_schema.sql). Ett
+transaktionsbaserat prov i
+[`supabase/paper_sync_rls_check.sql`](supabase/paper_sync_rls_check.sql)
+bekräftade att två användare bara ser och ändrar sina egna poster, att
+anonym Auth nekas och att testdata rullas tillbaka. Supabases säkerhetsrådgivare
+visade inga kvarvarande varningar efter att direkt anrop till triggerfunktioner
+spärrades. Befintliga `trades` och lokala paperfiler påverkas inte.
+Terminalens serverjournal använder fortfarande sin tidigare Supabase-konfiguration;
+paperloggens webbläsarklient använder enbart det nya testprojektet.
 
-För att testa synken: skapa ett isolerat projekt, konfigurera e-postinloggning
-och tillåt preview-adressen som Auth redirect, tillämpa SQL-designen där och
-verifiera med två olika användarkonton att ingen kan läsa eller ändra den
-andras poster. Aktivera därefter `VITE_PAPER_CLOUD_ENABLED=true` tillsammans
-med **det isolerade projektets** `VITE_PAPER_SUPABASE_URL` och
-`VITE_PAPER_SUPABASE_PUBLISHABLE_KEY` vid Vite-bygget och publicera en ny
-preview. Inga serverhemligheter får användas i `VITE_`-variabler.
+Testprojektets Auth Site URL och enda redirect-URL är previewgrenens fasta
+adress. E-postinloggning och bekräftelse är aktiva; anonym inloggning är av.
+På Vercel är `VITE_PAPER_CLOUD_ENABLED=true`, `VITE_PAPER_SUPABASE_URL` och
+`VITE_PAPER_SUPABASE_PUBLISHABLE_KEY` begränsade till
+`codex/market-scanner-preview`. De används först av ett **nytt preview-bygge**.
+Ingen serverhemlighet får användas i `VITE_`-variabler. För ett end-to-end-prov
+behöver en teamadress skapa och bekräfta ett personligt Auth-konto i previewn,
+sedan synka en paperobservation och kontrollera den från en andra webbläsare.
+Det SQL-baserade RLS-provet ersätter inte det webbläsarprovet.
 Standardutskicket för Auth kan kräva egen SMTP för e-postadresser utanför
 projektets team ([Supabase Auth SMTP](https://supabase.com/docs/guides/auth/auth-smtp)).
 
