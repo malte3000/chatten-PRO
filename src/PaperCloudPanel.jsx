@@ -4,7 +4,7 @@ import { syncPaperCloud } from "./paperCloudSync.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
 
-export default function PaperCloudPanel({ onSynced }) {
+export default function PaperCloudPanel({ localCount, onSynced }) {
   const client = useMemo(() => createPaperCloudClient(), []);
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(client.enabled);
@@ -93,7 +93,13 @@ export default function PaperCloudPanel({ onSynced }) {
       if (verified.error || verified.data?.user?.id !== user?.id) throw new Error("Sessionen kunde inte verifieras. Logga in igen.");
       const result = await syncPaperCloud({ client, userId: user.id, storage: window.localStorage, lockManager: navigator.locks });
       onSynced(result.records);
-      setNotice(`Synk klar: ${result.uploaded} lokala observationer uppladdade, ${result.downloaded} hämtade och ${result.advanced} senare paperutfall uppdaterade i molnet. Ta gärna en JSON-kopia som extra backup.`);
+      if (result.records.length === 0) {
+        setNotice("Synken är klar, men paperloggen är tom både i den här webbläsaren och i molnet. Inget fördes över.");
+      } else if (result.uploaded === 0 && result.downloaded === 0 && result.advanced === 0) {
+        setNotice("Synken är klar. Inga nya eller ändrade paperobservationer fördes över den här gången.");
+      } else {
+        setNotice(`Synk klar: ${result.uploaded} lokala observationer uppladdade, ${result.downloaded} hämtade och ${result.advanced} senare paperutfall uppdaterade i molnet. Ta gärna en JSON-kopia som extra backup.`);
+      }
     } catch (problem) {
       setError(`Synken avbröts: ${problem.message} Ingen konflikt skrevs över. Om ett uppladdat utfall avbröts mitt i processen kan du prova Synka igen.`);
     } finally { setBusy(false); }
@@ -103,6 +109,7 @@ export default function PaperCloudPanel({ onSynced }) {
     <h3 className="font-medium">Personlig molnsynk · test</h3>
     <p className="text-xs text-slate-400">Ett separat Supabase-konto används för paperloggen. Dagens gemensamma terminalinloggning och journal ändras inte. Synk sker bara när du trycker på knappen.</p>
     <p className="text-xs text-amber-300">Lokala poster som laddas upp märks som importerade och är inte verifierade affärer eller bevis för strategins träffsäkerhet. En konflikt mellan låsta signaler eller slututfall stoppar synken.</p>
+    {localCount !== null && <p className="text-xs text-slate-300">I den här webbläsaren: {localCount} paperobservationer.</p>}
     {checking ? <p className="text-slate-400">Kontrollerar konto…</p> : user ? <div className="flex flex-wrap gap-3 items-center">
       <span className="text-slate-300">Inloggad: {user.email || "personligt konto"}</span>
       <button type="button" className={CONTROL} onClick={sync} disabled={busy}>Synka paperloggen nu</button>

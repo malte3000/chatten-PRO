@@ -135,7 +135,7 @@ export default function PaperJournal({ latestAnalysis }) {
       <button className={CONTROL} onClick={exportLog} disabled={!state.records.length}>Exportera JSON-kopia</button>
       <label className="text-slate-300">Importera JSON-kopia<input ref={importInput} className="block mt-1 text-xs" type="file" accept=".json,application/json" onChange={importLog} disabled={Boolean(state.storageError)} /></label>
     </div>
-    <PaperCloudPanel onSynced={(records) => setState({ records, storageError: "" })} />
+    <PaperCloudPanel localCount={state.storageError ? null : state.records.length} onSynced={(records) => setState({ records, storageError: "" })} />
     {state.storageError && <p role="alert" className="text-red-300 text-sm">{state.storageError}</p>}
     {error && <p role="alert" className="text-red-300 text-sm">{error}</p>}
     {notice && <p role="status" className="text-cyan-300 text-sm">{notice}</p>}
