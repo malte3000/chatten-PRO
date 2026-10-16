@@ -28,6 +28,17 @@ export function resolvePaperCloudConfig(env = import.meta.env) {
   return { enabled: true, url, publishableKey };
 }
 
+export function paperAuthRedirectError(location = globalThis.location) {
+  const hash = new URLSearchParams(location?.hash?.replace(/^#/, "") || "");
+  const query = new URLSearchParams(location?.search?.replace(/^\?/, "") || "");
+  const params = hash.has("error") || hash.has("error_code") ? hash : query;
+  if (!params.has("error") && !params.has("error_code")) return "";
+  if (params.get("error_code") === "otp_expired") {
+    return "Bekräftelselänken är ogiltig eller har gått ut. Ange din e-postadress och välj Skicka ny bekräftelselänk.";
+  }
+  return "Bekräftelselänken kunde inte användas. Ange din e-postadress och välj Skicka ny bekräftelselänk.";
+}
+
 /** Optional personal Auth client. It never receives the server's secret key. */
 export function createPaperCloudClient({
   env = import.meta.env,
@@ -41,13 +52,18 @@ export function createPaperCloudClient({
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
   const paper = createPaperCloudRepository(client);
+  function confirmationRedirect() {
+    if (!origin) throw new Error("Sidans adress saknas för verifieringslänken.");
+    return new URL("/", origin).href;
+  }
 
   return {
     enabled: true,
     async signUp(email, password) {
-      if (!origin) throw new Error("Sidans adress saknas för verifieringslänken.");
-      const emailRedirectTo = new URL("/", origin).href;
-      return client.auth.signUp({ email, password, options: { emailRedirectTo } });
+      return client.auth.signUp({ email, password, options: { emailRedirectTo: confirmationRedirect() } });
+    },
+    async resendSignupConfirmation(email) {
+      return client.auth.resend({ type: "signup", email, options: { emailRedirectTo: confirmationRedirect() } });
     },
     signIn(email, password) {
       return client.auth.signInWithPassword({ email, password });

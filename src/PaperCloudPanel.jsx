@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createPaperCloudClient } from "./paperCloudClient.js";
+import { createPaperCloudClient, paperAuthRedirectError } from "./paperCloudClient.js";
 import { syncPaperCloud } from "./paperCloudSync.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
@@ -12,7 +12,7 @@ export default function PaperCloudPanel({ onSynced }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("signin");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => paperAuthRedirectError());
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -46,7 +46,7 @@ export default function PaperCloudPanel({ onSynced }) {
       if (result.error) throw result.error;
       setPassword("");
       if (mode === "signup" && !result.data?.session) {
-        setNotice("Kontot är skapat. Bekräfta e-postadressen via länken från Supabase och logga sedan in här.");
+        setNotice("Kontot är skapat. Bekräfta e-postadressen via länken från Supabase och logga sedan in här. Om länken inte fungerar kan du begära en ny nedan.");
       } else {
         const verified = await client.getUser();
         if (verified.error || !verified.data?.user) throw new Error("Kontot kunde inte verifieras. Försök logga in igen.");
@@ -55,6 +55,23 @@ export default function PaperCloudPanel({ onSynced }) {
       }
     } catch (problem) {
       setError(`Kontot kunde inte användas: ${problem.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function resendConfirmation() {
+    const address = email.trim();
+    if (!address) { setError("Ange e-postadressen för kontot först."); return; }
+    setError(""); setNotice(""); setBusy(true);
+    try {
+      const result = await client.resendSignupConfirmation(address);
+      if (result.error) throw result.error;
+      setNotice("Om kontot väntar på bekräftelse har en ny länk begärts. Kontrollera inkorg och skräppost och använd det senaste mejlet.");
+    } catch (problem) {
+      if (problem.code === "over_email_send_rate_limit" || problem.status === 429) {
+        setError("För många bekräftelsemejl har begärts. Vänta en stund innan du försöker igen.");
+      } else {
+        setError(`Ny bekräftelselänk kunde inte begäras: ${problem.message}`);
+      }
     } finally { setBusy(false); }
   }
 
@@ -95,6 +112,7 @@ export default function PaperCloudPanel({ onSynced }) {
       <label>Lösenord<input className={`${CONTROL} block mt-1`} type="password" minLength="6" autoComplete={mode === "signup" ? "new-password" : "current-password"} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
       <button className={CONTROL} type="submit" disabled={busy}>{mode === "signup" ? "Skapa konto" : "Logga in"}</button>
       <button className={CONTROL} type="button" disabled={busy} onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); setPassword(""); }}>{mode === "signup" ? "Har du redan konto?" : "Skapa nytt konto"}</button>
+      <button className={CONTROL} type="button" disabled={busy || !email.trim()} onClick={resendConfirmation}>Skicka ny bekräftelselänk</button>
     </form>}
     {error && <p role="alert" className="text-red-300">{error}</p>}
     {notice && <p role="status" className="text-cyan-300">{notice}</p>}

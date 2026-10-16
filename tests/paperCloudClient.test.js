@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPaperCloudClient, resolvePaperCloudConfig } from "../src/paperCloudClient.js";
+import { createPaperCloudClient, paperAuthRedirectError, resolvePaperCloudConfig } from "../src/paperCloudClient.js";
 
 const configured = {
   VITE_PAPER_CLOUD_ENABLED: "true",
@@ -49,6 +49,7 @@ test("configured client forwards Auth calls and confirms email on the current or
       calls.push(["factory", url, key, options]);
       return { from() { throw new Error("paper table should not be accessed by Auth calls"); }, auth: {
         signUp: async (body) => { calls.push(["signUp", body]); return response; },
+        resend: async (body) => { calls.push(["resend", body]); return response; },
         signInWithPassword: async (body) => { calls.push(["signIn", body]); return response; },
         signOut: async () => { calls.push(["signOut"]); return response; },
         getSession: async () => { calls.push(["getSession"]); return response; },
@@ -64,8 +65,10 @@ test("configured client forwards Auth calls and confirms email on the current or
   assert.equal(calls[0][3].auth.persistSession, true);
   assert.deepEqual(await cloud.signUp("malte@example.com", "password"), response);
   assert.deepEqual(calls[1][1], { email: "malte@example.com", password: "password", options: { emailRedirectTo: "https://preview.example.com/" } });
+  assert.deepEqual(await cloud.resendSignupConfirmation("malte@example.com"), response);
+  assert.deepEqual(calls[2][1], { type: "signup", email: "malte@example.com", options: { emailRedirectTo: "https://preview.example.com/" } });
   assert.deepEqual(await cloud.signIn("malte@example.com", "password"), response);
-  assert.deepEqual(calls[2][1], { email: "malte@example.com", password: "password" });
+  assert.deepEqual(calls[3][1], { email: "malte@example.com", password: "password" });
   assert.deepEqual(await cloud.getSession(), response);
   assert.deepEqual(await cloud.getUser(), response);
   assert.deepEqual(await cloud.signOut(), response);
@@ -81,5 +84,14 @@ test("sign-up fails closed when there is no browser origin", async () => {
     clientFactory: () => ({ from() {}, auth: { getUser() {}, signUp() { called = true; } } }),
   });
   await assert.rejects(cloud.signUp("malte@example.com", "password"), /adress saknas/);
+  await assert.rejects(cloud.resendSignupConfirmation("malte@example.com"), /adress saknas/);
   assert.equal(called, false);
+});
+
+test("paper Auth redirect errors show a safe recovery message without echoing URL text", () => {
+  assert.equal(paperAuthRedirectError({ hash: "", search: "" }), "");
+  assert.match(paperAuthRedirectError({ hash: "#error=access_denied&error_code=otp_expired&error_description=secret", search: "" }), /Skicka ny bekräftelselänk/);
+  assert.doesNotMatch(paperAuthRedirectError({ hash: "#error=access_denied&error_code=otp_expired&error_description=secret", search: "" }), /secret/);
+  assert.match(paperAuthRedirectError({ hash: "#error_code=otp_expired", search: "" }), /ogiltig eller har gått ut/);
+  assert.match(paperAuthRedirectError({ hash: "", search: "?error=access_denied&error_code=other" }), /kunde inte användas/);
 });
