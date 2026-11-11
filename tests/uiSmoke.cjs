@@ -1,6 +1,7 @@
 // Optional browser smoke test. Requires Playwright and a running Vite server.
 // PLAYWRIGHT_MODULE may point to a bundled Playwright installation.
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
 
 function createMockApi() {
   const saved = [];
@@ -156,6 +157,23 @@ async function runSmoke() {
     assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "WAIT").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
     assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical watch candidates");
     await scanner.getByText("4 tekniska kandidater (AVVAKTA)", { exact: false }).waitFor();
+    const [scanDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      scanner.getByRole("button", { name: "Exportera skanningsrapport (JSON)" }).click(),
+    ]);
+    const scanJson = await fs.readFile(await scanDownload.path(), "utf8");
+    const scanReport = JSON.parse(scanJson);
+    assert.equal(scanReport.format, "sannolikhet-scan-report-v1");
+    assert.equal(scanReport.market, "usa");
+    assert.equal(scanReport.horizon, "week");
+    assert.equal(scanReport.requested_limit, 20);
+    assert.equal(scanReport.complete, true);
+    assert.equal(scanReport.checked, 5);
+    assert.equal(scanReport.results.length, 5);
+    assert.deepEqual(scanReport.results.map((item) => item.status).sort(), ["NO_TRADE", "WAIT", "WAIT", "WAIT", "WAIT"]);
+    assert.ok(scanReport.results.every((item) => Array.isArray(item.reasons) && item.reasons.length));
+    assert.ok(scanReport.scan_started_at && scanReport.scan_finished_at && scanReport.seed);
+    assert.equal(/api.?key|password|auth.?token/i.test(scanJson), false);
     await page.screenshot({ path: "tests/preview-scanner-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
@@ -285,7 +303,7 @@ async function runSmoke() {
     await page.getByRole("region", { name: "Samlad analys" }).getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
     assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
 
-    const paperPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const paperPage = await browser.newPage({ viewport: { width: 1280, height: 900 }, timezoneId: "Europe/Stockholm" });
     paperPage.on("pageerror", (error) => errors.push(error.message));
     const paperMock = createMockApi();
     paperMock.setPaperPhase("signal");
@@ -315,19 +333,39 @@ async function runSmoke() {
     assert.equal(captured.holdingSessions, 1);
     assert.equal(captured.feePerOrder, 1);
     assert.equal(captured.slippageBps, 10);
+    await paperPage.getByRole("button", { name: "Starta analys" }).click();
+    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+    await paperJournal.getByText("Spara teknisk BEVAKA-kandidat lokalt", { exact: true }).click();
+    await paperJournal.getByLabel("Max observerade sessioner").selectOption("1");
+    await paperJournal.getByLabel("Fast simulerat aktieantal").fill("2");
+    await paperJournal.getByLabel("Avgift per order (USD)").fill("1");
+    await paperJournal.getByLabel("Slippage i baspunkter").fill("10");
+    await paperJournal.getByRole("button", { name: "Spara paperobservation" }).click();
+    await paperJournal.getByText(/Samma aktie, upplägg och signaldatum finns redan i paperloggen/).waitFor();
+    assert.equal((await readPaper()).length, 1);
 
     paperMock.setPaperPhase("stale");
+    await paperPage.clock.setFixedTime(new Date("2026-09-29T14:05:00Z"));
+    const tradingView = paperPage.getByRole("region", { name: "TradingView-paperjournal" });
+    await tradingView.getByText(/Registrera TradingView-paperköp för NVDA/).click();
+    await tradingView.getByLabel("Köptid i lokal tid").fill("2026-09-29T16:00");
+    await tradingView.getByLabel("Fyllt köppris (USD)").fill(String(captured.plan.entry_reference));
+    await tradingView.getByLabel("Fyllt antal aktier").fill("2");
+    await tradingView.getByLabel("Köpavgift (USD, ange 0 om ingen)").fill("1");
+    await tradingView.getByRole("button", { name: "Spara fyllt paperköp" }).click();
+    await tradingView.getByText(/TradingViews fyllda paperköp är sparat lokalt/).waitFor();
+    const readTradingView = () => paperPage.evaluate(() => JSON.parse(localStorage.getItem("sannolikhet-tradingview-paper-orders-v1")).records);
+    assert.equal((await readTradingView())[0].status, "OPEN");
+    assert.equal((await readTradingView())[0].entryLateLogged, false);
+
     await paperPage.clock.setFixedTime(new Date("2026-09-29T21:00:00Z"));
-    await paperPage.getByRole("button", { name: "Starta analys" }).click();
-    const staleAnalysis = paperPage.getByRole("region", { name: "Samlad analys" });
-    await staleAnalysis.getByText("NO TRADE · EJ BEDÖMT", { exact: true }).waitFor();
-    await staleAnalysis.locator('[aria-label="Datakontroll för swing"]').getByText(/Senaste levererade dagskurs: 2026-09-28/).waitFor();
-    await staleAnalysis.locator('[aria-label="Datakontroll för swing"]').getByText("EJ BEDÖMT", { exact: true }).waitFor();
-    assert.equal(paperMock.saved[0].signal_inputs.decision.status, "NO_TRADE");
+    await paperPage.clock.runFor(60_000);
+    await paperJournal.getByRole("button", { name: "Kontrollera öppna paperposter" }).click();
+    await paperJournal.getByText(/1 instrument kontrollerades med 1 dataanrop/).waitFor();
     assert.equal((await readPaper())[0].status, "NOT_ASSESSED");
 
     paperMock.setPaperPhase("followup");
-    await paperPage.getByRole("button", { name: "Starta analys" }).click();
+    await paperJournal.getByRole("button", { name: "Kontrollera öppna paperposter" }).click();
     await paperJournal.getByText(/1 observationer · 1 avslutade/).waitFor();
     const [settled] = await readPaper();
     assert.equal(settled.id, captured.id);
@@ -338,8 +376,23 @@ async function runSmoke() {
     assert.equal(settled.exitReason, "TIME_EXIT");
     assert.ok(Number.isFinite(settled.netPnl));
     assert.ok(Number.isFinite(settled.resultR));
+    await tradingView.getByText("Registrera full försäljning från TradingView").click();
+    await tradingView.getByLabel("Säljtid i lokal tid").fill("2026-09-29T21:30");
+    await tradingView.getByLabel("Fyllt säljpris (USD)").fill("151");
+    await tradingView.getByLabel("Antal sålda aktier (hela innehavet: 2)").fill("2");
+    await tradingView.getByLabel("Säljavgift (USD, ange 0 om ingen)").fill("1");
+    await tradingView.getByRole("button", { name: "Spara avslutad paperorder" }).click();
+    await tradingView.getByText(/TradingViews fyllda försäljning är sparad lokalt/).waitFor();
+    const [manual] = await readTradingView();
+    assert.equal(manual.status, "CLOSED");
+    assert.equal(manual.sourcePaperObservationId, captured.id);
+    assert.equal(manual.netPnl, (151 - manual.entryPrice) * 2 - 2);
+    assert.equal((await readPaper())[0].netPnl, settled.netPnl);
+    await paperPage.reload();
+    assert.equal((await readPaper())[0].status, "CLOSED");
+    assert.equal((await readTradingView())[0].status, "CLOSED");
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: technical scanner, optional news, swing watch/risk calculation, stale-session diagnostics, paper save/settle, actual trade save/close, day prefilter, missing market clock, ticker invalidation, mobile layout, failed-news and unavailable Swedish scan regressions.");
+    console.log("Browser smoke passed: scanner export, swing watch, duplicate guard, TradingView manual paper fill and close, theoretical paper follow-up with stale-data retry, optional news, day prefilter, real trade mock, missing market clock and mobile layout.");
   } finally { await browser.close(); }
 }
 

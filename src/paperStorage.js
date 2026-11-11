@@ -36,6 +36,21 @@ export function loadPaperLog(storage) {
   return raw === null ? [] : decodePaperLog(raw);
 }
 
+function lockedSignalKey(record) {
+  return JSON.stringify([
+    record.market, record.ticker, record.exchange.toUpperCase().replace(/[\s_-]/g, ""),
+    record.signalDate, record.setup, record.strategyVersion, record.basis ?? null,
+  ]);
+}
+
+/** A fresh analysis ID must not count the same locked setup twice. */
+export function findDuplicatePaperSignal(records, candidate) {
+  inspect(records);
+  if (!validatePaperObservation(candidate)) throw new Error("Den nya paperobservationen är ogiltig.");
+  const key = lockedSignalKey(candidate);
+  return records.find((record) => lockedSignalKey(record) === key) ?? null;
+}
+
 export function savePaperLog(storage, records) {
   // Validation and serialization finish before the first write. A failing
   // storage provider cannot make an in-memory observation appear saved.

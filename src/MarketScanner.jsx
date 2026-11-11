@@ -73,12 +73,66 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     }
   }
 
+  function exportReport() {
+    if (!report || busy) return;
+    try {
+      // Only public market observations and scanner settings are exported.
+      // The API key, login state, and shared journal record are never included.
+      const exportData = {
+        format: "sannolikhet-scan-report-v1",
+        exported_at: new Date().toISOString(),
+        scan_started_at: report.startedAt,
+        scan_finished_at: report.finishedAt,
+        market: report.market, horizon: report.horizon, seed: report.seed,
+        requested_limit: report.requestedLimit,
+        checked: report.checked, target: report.target,
+        universe_size: report.universeSize, complete: report.complete,
+        scan_error: report.scanError || null,
+        results: report.results.map((item) => ({
+          symbol: item.symbol, name: item.name, exchange: item.exchange,
+          mic_code: item.mic_code, currency: item.currency, country: item.country,
+          status: item.status, rank_score: item.rank_score, reasons: item.reasons,
+          data_issue: item.data_issue, screen_version: item.screen_version,
+          screening_selection: item.screening_selection,
+          screening_setups: item.screening_setups,
+          metrics: item.metrics,
+          data_snapshot: item.data_snapshot ? {
+            source: item.data_snapshot.source,
+            interval: item.data_snapshot.interval,
+            timestamp_timezone: item.data_snapshot.timestamp_timezone,
+            fetched_at: item.data_snapshot.fetched_at,
+            timestamp_kind: item.data_snapshot.timestamp_kind,
+            validation: item.data_snapshot.validation,
+            bars: item.data_snapshot.bars?.map((bar) => ({
+              datetime: bar.datetime, open: bar.open, high: bar.high,
+              low: bar.low, close: bar.close, volume: bar.volume,
+            })),
+            screening_selection: item.data_snapshot.screening_selection,
+          } : null,
+        })),
+      };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `skanning-${report.market}-${report.horizon}-${report.seed}.json`;
+      document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setProgress("Skanningsrapporten laddades ned som JSON. Spara filen för att jämföra nästa paperprov.");
+    } catch (problem) {
+      setError(`Skanningsrapporten kunde inte exporteras: ${problem.message}`);
+    }
+  }
+
   async function start() {
     if (busy || market === "off") return;
     reset();
     const version = revision.current;
     const abort = new AbortController(); controller.current = abort;
     setBusy(true);
+    const startedAt = new Date().toISOString();
+    const requestedLimit = limit;
+    const requestedMarket = market;
+    const requestedHorizon = horizon;
     const seed = new Date().toISOString().slice(0, 10);
     let offset = 0;
     let results = [];
@@ -106,7 +160,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
         results = rankCandidates([...results, ...batch.results]);
         complete = batch.done === true;
         if (version !== revision.current) return;
-        setReport({ results, checked: offset, target, universeSize, complete: false, seed });
+        setReport({ results, checked: offset, target, universeSize, complete: false, seed, startedAt, finishedAt: null, requestedLimit, market: requestedMarket, horizon: requestedHorizon });
         if (!complete) {
           setProgress(`Väntar på databudget · ${offset}/${target} aktier kontrollerade. Du kan stoppa skanningen.`);
           await pause(Math.max(0, Math.min(batch.wait_ms || 0, 120000)), abort.signal);
@@ -119,7 +173,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
       setError(scanError);
     } finally {
       if (version === revision.current) {
-        const final = { results: rankCandidates(results), checked: offset, target, universeSize, complete, seed, scanError };
+        const final = { results: rankCandidates(results), checked: offset, target, universeSize, complete, seed, scanError, startedAt, finishedAt: new Date().toISOString(), requestedLimit, market: requestedMarket, horizon: requestedHorizon };
         const assessedCount = final.results.filter((item) => item.status === "WAIT" || item.status === "NO_TRADE").length;
         const unavailableCount = final.results.filter((item) => item.status === "NOT_ASSESSED").length;
         const scanStatus = assessedCount === 0 ? "NOT_ASSESSED" : unavailableCount > 0 ? "PARTIALLY_ASSESSED" : "ASSESSED";
@@ -161,6 +215,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     </div>}
     {creditUsageError && <p role="alert" className="text-sm text-amber-300">Kunde inte visa API-krediter: {creditUsageError}</p>}
     <p className="text-xs text-slate-400">Automatiskt urval av stödda aktier, inte hela börsen. Ett nytt klick samma UTC-dag ger normalt samma aktier; en större budget utökar urvalet. Skanningen kan ta flera minuter på grund av API-kvoten. Kandidater bedöms enbart med tekniska filter.</p>
+    {market === "usa" && horizon === "week" && <p className="text-xs text-slate-400">USA-swing kräver den senaste färdigställda dagskursen. Om den ännu inte finns hos datakällan strax efter stängning blir aktien EJ BEDÖMT. Kontrollera datumet i samlad analys och försök igen före nästa öppning när kursen har levererats.</p>}
     {market === "off" && <p className="text-sm text-amber-300">Välj USA eller Sverige för att ange vilken marknad som ska skannas. Av finns kvar för manuell analys.</p>}
     <p className="text-xs text-slate-400">Skannern försöker utesluta warranter och certifikat, men datakällans produktklassning behöver verifieras. Separat produktdata och riskkontroll krävs för dem.</p>
     {market === "stockholm" && <p className="text-xs text-slate-400">Sveriges aktielista kan innehålla instrument utan tillgänglig prisdata. De markeras EJ BEDÖMT; ingen teknisk slutsats dras.</p>}
@@ -168,6 +223,7 @@ export default function MarketScanner({ market, horizon, onAnalyze, onSaved }) {
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
+      {!busy && <button type="button" className="border border-cyan-800 rounded px-3 py-2 text-sm text-cyan-300" onClick={exportReport}>Exportera skanningsrapport (JSON)</button>}
       <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} {horizon === "day" ? "tekniska förfilterträffar (ej AVVAKTA-beslut)" : "tekniska kandidater (AVVAKTA)"} · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda (kursdata ej verifierad). Inga godkända TRADE-signaler.</p>
       {horizon === "day" && candidates.length > 0 && <p className="text-xs text-amber-300">Daytradeskannern är ett tekniskt förfilter. Samlad analys ger NO TRADE tills en separat daytrade-strategi kan bedömas.</p>}
       {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{rejected.length === 0

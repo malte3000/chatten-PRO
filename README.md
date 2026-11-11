@@ -215,6 +215,36 @@ krävs fortfarande före TRADE.
 
 ## Paperlogg för framtida utfall (experimentell)
 
+För det första sammanhängande paperprovet används **USA + swing**. Kör en
+skanning när den senaste stängda dagskursen har levererats och exportera hela
+skanningsrapporten, även om allt blev NO TRADE eller EJ BEDÖMT. Öppna samlad
+analys för varje teknisk AVVAKTA-kandidat som ska ingå i provet och spara den
+låsta paperobservationen innan nästa handelssession öppnar. Använd samma
+innehavstid, antal, avgift och slippage för varje nytt prov. När nästa
+handelssession har stängt kan **Kontrollera öppna paperposter** hämta senare
+kurser; exportera sedan paperloggen som JSON. En signal för samma aktie,
+upplägg och signaldatum kan bara sparas en gång, även om analysen körs om.
+
+USA:s avslutade dagskurs kan komma först en tid efter börsens stängning.
+Twelve Data anger att historisk/EOD-data på Basic blir tillgänglig efter
+midnatt i New York inför nästa handelsdag
+([Twelve Data: US equities market data](https://support.twelvedata.com/en/articles/9935903-us-equities-market-data)).
+Om terminalen visar **EJ BEDÖMT · KURSDATA EJ VERIFIERAD** därför att senaste
+stängda sessionen saknas, vänta tills rätt dagsdatum finns i datakontrollen
+och analysera igen före nästa öppning. Ett nytt försök kan förbruka API-krediter.
+
+Terminalen simulerar ett köp vid nästa öppning från dagskurser och låsta
+antaganden. **TradingView · manuella paperköp** är en separat lokal journal för
+de order som faktiskt fylls i TradingViews paperkonto. För varje låst signal
+kan användaren ange köptid, fyllt köppris, antal och avgift under nästa
+ordinarie handelssession, och senare säljtid, fyllt säljpris, sålt antal och avgift.
+Journalen avslutar bara hela positioner; delvisa försäljningar stöds ännu inte.
+Nettoresultat och R räknas från de manuellt angivna fyllnaderna och blandas
+inte med terminalens teoretiska simulering. Uppgifterna är inte verifierade
+mot TradingView. Exportera därför både paperobservationer och TradingView-order
+som varsin JSON-kopia; båda kan importeras igen utan att redan låsta utfall skrivs över. Ändra inte försöksreglerna utifrån några få tidiga
+utfall; då blir resultatet svårt att tolka.
+
 En teknisk BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal
 paperobservation. Nyheter är valfri bakgrund och påverkar inte beslutet.
 Nya paperposter märks **endast teknik** och hålls åtskilda från äldre
@@ -222,19 +252,24 @@ paperposter som skapades under den nyhetsstyrda beslutsregeln. Detta
 öppnar inte för en riktig TRADE-signal.
 Signalens datum, strategi, prisnivåer och uttryckliga antaganden om antal,
 avgifter, slippage och max innehavstid låses innan senare dagskurser finns.
-När samma aktie analyseras på nytt kontrolleras nya färdigställda dagskurser
-mot den låsta observationen. Kontroll görs bara vid användarens vanliga analys;
-paperloggen startar inga egna API-anrop, bakgrundsjobb eller order. Utfallet
+Nya färdigställda dagskurser kontrolleras med knappen **Kontrollera öppna paperposter**. Knappen visar hur många
+instrument som kan kontrolleras innan användaren startar den. Ett klick hämtar
+högst fem instrument sekventiellt via marknadsdata-API:t och kan förbruka
+API-kvot. Ett nät- eller kvotfel stoppar fortsättningen; redan sparade lokala
+uppdateringar finns kvar. Ingen bakgrundskörning eller order startas. Utfallet
 kan vara väntande, simulerat avslutat, avvisad ingång eller ej bedömbart.
 Vinst/förlust och netto räknas bara för avslutade simuleringar. NO TRADE är ett
 avstående och räknas aldrig som en lyckad trade.
 
-Paperloggen lagras i den aktuella webbläsaren på **previewns branch-adress**.
-Den finns inte i Supabase och synkas inte automatiskt mellan datorer eller
-olika previewdomäner. JSON-export ger en kopia som kan importeras på en annan
-dator. Olika poster med samma ID skrivs inte över vid import. Det är en
-experimentell, lokalt redigerbar logg, ingen verifierad revisionskedja eller
-grund för att låsa upp TRADE.
+Paperloggen lagras först i den aktuella webbläsaren på **previewns branch-adress**.
+I den aktiverade previewn kan användaren logga in i ett personligt paperkonto och
+trycka **Synka paperloggen nu** för att föra över poster till det separata
+Supabase-testprojektet och hämta dem på en annan dator. Synken sker inte
+automatiskt. Olika previewdomäner har varsin lokal lagring; JSON-export ger en
+extra kopia som kan importeras manuellt. Olika poster med samma ID skrivs inte
+över vid import. Lokala och importerade observationer samt deras simulerade
+utfall är inte oberoende verifierade och kan inte användas som underlag för att
+låsa upp TRADE.
 
 En personlig molnsynk finns i koden och är **avstängd som standard** i nya
 miljöer. Ett separat Supabase Free-testprojekt, `chatten-pro-paper-sync-test`

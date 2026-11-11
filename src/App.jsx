@@ -141,6 +141,7 @@ export default function App() {
   const [saveState, setSaveState] = useState("idle");
   const [newsLoading, setNewsLoading] = useState(false);
   const [history, setHistory] = useState([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const revision = useRef(0);
@@ -159,12 +160,11 @@ export default function App() {
     } catch (error) {
       if (version === historyRevision.current) setHistoryError(error.message);
     } finally {
-      if (version === historyRevision.current) setHistoryLoading(false);
+      if (version === historyRevision.current) { setHistoryLoading(false); setHistoryLoaded(true); }
     }
   }
 
   useEffect(() => {
-    void refreshHistory();
     return () => { controller.current?.abort(); newsController.current?.abort(); revision.current++; historyRevision.current++; };
   }, []);
 
@@ -332,6 +332,7 @@ export default function App() {
           {result.strategy.metrics?.latest_closed_candle && <p className="text-xs text-slate-400 mt-1">Bedömd stängd dagskurs: {result.strategy.metrics.latest_closed_candle}{result.marketData?.excluded_current_session ? " · dagens ofärdiga kurs uteslöts" : ""}.</p>}
           <ul className="text-sm mt-2 list-disc pl-5">{result.strategy.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           {result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}
+          {result.strategy.status === "WATCH" && <p className="text-sm text-cyan-300 mt-2">Paperkandidat för swing: lås upplägget i paperloggen innan nästa session öppnar. Om du testar i TradingView, registrera det fiktiva köpets faktiska fyllnadspris separat i paperloggen.</p>}
           <p className="text-xs text-amber-300 mt-2">Bevakningen är oprövad och använder ännu inget referensfilter. Nivåerna och positionskalkylen är provisoriska och godkänner aldrig en trade.</p>
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
         </div>}
@@ -342,7 +343,7 @@ export default function App() {
         <NewsEvidence news={result.news} />
         <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad. Paperloggen sparas separat i webbläsaren." : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
-        <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />
+        {saveState === "saved" && <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />}
         <Details title="nyheter, graf och data">
           <h3 className="font-semibold">Nyheter · valfri bakgrund</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || (newsLoading ? "Nyheter hämtas separat…" : result.newsRequested ? "Nyhetsanalysen kunde inte hämtas." : "Nyheter hämtades inte för den här analysen.")}</p>
           <p className="text-xs text-slate-400">Nyhetsinformationen påverkar inte AVVAKTA/NO TRADE och är inte en validerad handelssignal.</p>
@@ -357,9 +358,10 @@ export default function App() {
       <section className="border border-slate-800 rounded-lg p-4" aria-label="Journal">
         <div className="flex justify-between items-center"><h2 className="font-semibold">Senaste analyser och trades</h2><button className={CONTROL} disabled={historyLoading} onClick={refreshHistory}>{historyLoading ? "Hämtar…" : "Uppdatera"}</button></div>
         <p className="text-xs text-amber-300 mt-3">Nuvarande inloggning är gemensam. Journalen är inte personlig ännu. Analysförslag räknas inte som genomförda trades eller vinster.</p>
+        {!historyLoaded && !historyLoading && <p className="text-sm text-slate-400 mt-3">Den gemensamma journalen hämtas bara när du trycker Uppdatera. Signalanalys och lokal paperlogg fungerar även om journalens databas är pausad.</p>}
         {historyError && <p role="alert" className="text-sm text-red-300 mt-3">Journalen kunde inte hämtas: {historyError}</p>}
-        {!historyError && !historyLoading && !history.length && <p className="text-sm text-slate-400 mt-3">Inga sparade poster.</p>}
-        {!historyError && !historyLoading && <PerformanceSummary history={history} />}
+        {historyLoaded && !historyError && !historyLoading && !history.length && <p className="text-sm text-slate-400 mt-3">Inga sparade poster.</p>}
+        {historyLoaded && !historyError && !historyLoading && <PerformanceSummary history={history} />}
         <div className="mt-3 divide-y divide-slate-800">{history.slice(0, 5).map((trade) => {
           const analysis = trade.signal_inputs?.record_type === "ANALYSIS";
           const scan = trade.signal_inputs?.record_type === "SCAN";

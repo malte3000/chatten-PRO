@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { assessSwingSetup } from "../src/strategyModel.js";
 import { createPaperObservation } from "../src/paperModel.js";
-import { PAPER_STORAGE_KEY, decodePaperLog, encodePaperLog, loadPaperLog, mergePaperLogs, savePaperLog, updatePaperLog } from "../src/paperStorage.js";
+import { PAPER_STORAGE_KEY, decodePaperLog, encodePaperLog, findDuplicatePaperSignal, loadPaperLog, mergePaperLogs, savePaperLog, updatePaperLog } from "../src/paperStorage.js";
 
-function observation() {
-  const now = Date.parse("2026-09-28T21:00:00Z");
+function observation({ signalDate = "2026-09-28", analysisId = "TEST-example-1" } = {}) {
+  const now = Date.parse(`${signalDate}T21:00:00Z`);
   const dates = [];
-  let day = new Date("2026-09-28T00:00:00Z");
+  let day = new Date(`${signalDate}T00:00:00Z`);
   while (dates.length < 100) {
     if (![0, 6].includes(day.getUTCDay())) dates.unshift(day.toISOString().slice(0, 10));
     day = new Date(day.getTime() - 86400000);
@@ -18,7 +18,7 @@ function observation() {
     return { datetime, open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: index === 99 ? 1_500_000 : 1_000_000 };
   });
   const marketData = { ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: new Date(now - 60000).toISOString(), bars };
-  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", marketData, decision: { status: "WAIT" }, strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(now)), now }), record: { trade_id: "TEST-example-1", signal_inputs: { record_type: "ANALYSIS" } } };
+  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", marketData, decision: { status: "WAIT" }, strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(now)), now }), record: { trade_id: analysisId, signal_inputs: { record_type: "ANALYSIS" } } };
   return createPaperObservation(analysis, { setup: "BREAKOUT", holdingSessions: 3, quantity: 2, feePerOrder: 1, slippageBps: 10, recordedAt: now });
 }
 
@@ -56,6 +56,23 @@ test("merge adds disjoint observations, accepts identical copies and blocks conf
   const second = { ...first, sourceAnalysisTradeId: "TEST-example-2", id: "paper:TEST-example-2:BREAKOUT" };
   assert.deepEqual(mergePaperLogs([first], [first, second]), [first, second]);
   assert.throws(() => mergePaperLogs([first], [{ ...first, status: "NOT_ASSESSED", assessmentError: "Saknad framtida session." }]));
+});
+
+test("a repeated analysis ID cannot create another paper outcome for the same locked signal", () => {
+  const first = observation();
+  const repeated = observation({ analysisId: "TEST-example-2" });
+  assert.notEqual(first.id, repeated.id);
+  assert.equal(findDuplicatePaperSignal([first], repeated)?.id, first.id);
+  assert.equal(findDuplicatePaperSignal([first], { ...repeated, quantity: 10 })?.id, first.id);
+
+  const nextDate = observation({ signalDate: "2026-09-29", analysisId: "TEST-example-3" });
+  assert.equal(findDuplicatePaperSignal([first], nextDate), null);
+  const otherExchange = { ...repeated, exchange: "NYSE" };
+  assert.equal(findDuplicatePaperSignal([first], otherExchange), null);
+  const otherSetup = { ...repeated, id: "paper:TEST-example-2:PULLBACK", setup: "PULLBACK",
+    plan: { ...repeated.plan, setup: "PULLBACK" } };
+  assert.equal(findDuplicatePaperSignal([first], otherSetup), null);
+  assert.throws(() => findDuplicatePaperSignal([first], { ...repeated, netPnl: 20 }), /ogiltig/);
 });
 
 test("a storage write failure propagates and leaves the old log untouched", () => {
