@@ -18,7 +18,7 @@ function source(analysisId = "import-test-1") {
     return { datetime, open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: index === 99 ? 1_500_000 : 1_000_000 };
   });
   const marketData = { ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: "2026-09-28T20:59:00.000Z", bars };
-  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" }, marketData,
+  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" }, marketData,
     strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date("2026-09-28T21:00:00Z")), now: Date.parse("2026-09-28T21:00:00Z") }),
     record: { trade_id: analysisId, signal_inputs: { record_type: "ANALYSIS" } } };
   return createPaperObservation(analysis, { setup: "BREAKOUT", holdingSessions: 3, quantity: 2, feePerOrder: 1, slippageBps: 10, recordedAt: Date.parse("2026-09-28T21:00:00Z") });

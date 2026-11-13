@@ -25,7 +25,7 @@ function makeBars() {
 function fixture() {
   const marketData = { ticker: "TEST", requested_ticker: "TEST", exchange: "NASDAQ", currency: "USD",
     timezone: "America/New_York", interval: "1day", fetched_at: "2026-09-28T20:59:00.000Z", bars: makeBars() };
-  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" },
+  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" },
     strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(signalTime)), now: signalTime }),
     marketData, record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
   assert.equal(analysis.strategy.status, "WATCH");

@@ -3,13 +3,17 @@ import { normalizeTicker, evaluateReadiness, createAnalysisRecord, createRealTra
 import { fetchJson } from "./apiClient.js";
 import { assessSwingSetup } from "./strategyModel.js";
 import { calculatePositionSize } from "./riskModel.js";
+import { swingSignalValidity } from "./signalValidity.js";
 import MarketScanner from "./MarketScanner.jsx";
 import PerformanceSummary from "./PerformanceSummary.jsx";
 import HistoricalReplay from "./HistoricalReplay.jsx";
 import PaperJournal from "./PaperJournal.jsx";
 import NewsEvidence from "./NewsEvidence.jsx";
+import SignalJournal from "./SignalJournal.jsx";
+import { appendSignalLog, signalFromAnalysis } from "./signalLog.js";
 
-const LABELS = { TRADE: "TRADE", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE" };
+const LABELS = { TRADE: "TRADE · EXPERIMENTELL", WAIT: "AVVAKTA", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT" };
+const SETUP_LABELS = { PULLBACK: "rekyl mot EMA20", BREAKOUT: "20-dagarsutbrott", RANGE_BREAKOUT: "kort konsolideringsutbrott", REBOUND: "återhämtning i upptrend" };
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
@@ -33,11 +37,11 @@ const MARKET_CLOCK_LABELS = {
   holiday: "helgdagsstängd",
 };
 
-function SwingDataCheck({ result }) {
+function SwingDataCheck({ result, signalValidity }) {
   const { marketData, marketStatus, strategy } = result;
   const latestDate = marketData?.latest?.datetime || marketData?.bars?.at(-1)?.datetime || null;
   return <div className="border border-slate-800 rounded p-3 mt-3 text-sm" aria-label="Datakontroll för swing">
-    <div className="flex justify-between gap-3"><h3 className="font-semibold">Datakontroll</h3><span className={strategy.status === "NOT_ASSESSED" ? "text-amber-300" : "text-slate-300"}>{strategy.status === "NOT_ASSESSED" ? "EJ BEDÖMT" : "BEDÖMD"}</span></div>
+    <div className="flex justify-between gap-3"><h3 className="font-semibold">Datakontroll</h3><span className={strategy.status === "NOT_ASSESSED" || (signalValidity && signalValidity.status !== "CURRENT") ? "text-amber-300" : "text-slate-300"}>{signalValidity && signalValidity.status !== "CURRENT" ? "HISTORISK BEDÖMNING" : strategy.status === "NOT_ASSESSED" ? "EJ BEDÖMT" : "BEDÖMD"}</span></div>
     {marketData
       ? <>
         <p className="mt-1">Senaste levererade dagskurs: <strong>{latestDate || "saknas"}</strong>{marketData.exchange ? ` · ${marketData.exchange}` : ""}.</p>
@@ -48,7 +52,7 @@ function SwingDataCheck({ result }) {
     {marketStatus
       ? <p className="text-slate-400">Börsklocka: {MARKET_CLOCK_LABELS[marketStatus.reason] || marketStatus.label || "status okänd"}{marketStatus.sessionDate ? ` · lokalt börsdatum ${marketStatus.sessionDate}` : ""}.</p>
       : <p className="text-amber-300">{result.market === "off" ? "Marknadskontrollen är av; swingupplägget bedöms inte." : "Börsklockan kunde inte verifieras. Se felorsaken ovan."}</p>}
-    {strategy.status === "NOT_ASSESSED" && <p className="text-amber-300 mt-1">Regeln kunde inte bedöma detta underlag; NO TRADE är ett säkerhetsbeslut, inte ett testat negativt upplägg.</p>}
+    {strategy.status === "NOT_ASSESSED" && <p className="text-amber-300 mt-1">Regeln kunde inte bedöma detta underlag. Ingen slutsats om affärsläget har dragits.</p>}
   </div>;
 }
 
@@ -71,7 +75,7 @@ function RealTradeForm({ analysis, onSave }) {
     finally { setSaving(false); }
   }
   return <Details title="registrera en faktisk trade">
-    <p>Manuell journalföring av en affär du själv redan har tagit. Terminalens beslut är inte en köp- eller säljsignal.</p>
+    <p>Registrera bara en affär som du själv faktiskt har lagt. En TRADE-signal är ett tekniskt förslag och lägger ingen order.</p>
     {saved ? <p role="status">Faktisk trade sparad som öppen.</p> : <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
       <label>Riktning<select className={`${CONTROL} block w-full mt-1`} value={direction} onChange={(event) => setDirection(event.target.value)}><option value="LONG">Lång</option><option value="SHORT">Kort</option></select></label>
       <label>Faktiskt ingångspris<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.000001" step="any" required value={entry} onChange={(event) => setEntry(event.target.value)} /></label>
@@ -115,8 +119,8 @@ function RiskCalculator({ plan, currency }) {
   const [fees, setFees] = useState("0");
   const calculation = calculatePositionSize({ capital, riskPercent, entry: plan.entry_reference, stop: plan.stop, estimatedFees: fees });
   const money = (value) => `${Number(value).toFixed(2)} ${currency || "valuta"}`;
-  return <Details title={`${plan.setup === "PULLBACK" ? "pullback" : "breakout"} · provisorisk riskplan`}>
-    <p>Referenspris {money(plan.entry_reference)} · tänkt stop {money(plan.stop)} · teoretiskt mål {money(plan.target)} · 2R före kostnader. Nivåerna kommer från ett oprövat regelutkast och behöver räknas om vid aktuell prisdata.</p>
+  return <Details title={`${SETUP_LABELS[plan.setup] || plan.setup} · provisorisk riskplan`}>
+    <p>Referenspris {money(plan.entry_reference)} · tänkt stop {money(plan.stop)} · teoretiskt mål {money(plan.target)} · {plan.theoretical_risk_reward}R före kostnader. Nivåerna utgår från senaste stängda dagskurs och måste jämföras med faktiskt ingångspris.</p>
     <div className="grid gap-3 sm:grid-cols-3">
       <label>Kontokapital ({currency || "valuta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.01" step="any" value={capital} onChange={(event) => setCapital(event.target.value)} /></label>
       <label>Max risk per trade (%)<input className={`${CONTROL} block w-full mt-1`} type="number" min="0.01" max="100" step="any" value={riskPercent} onChange={(event) => setRiskPercent(event.target.value)} /></label>
@@ -138,12 +142,14 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [signalLogError, setSignalLogError] = useState("");
   const [saveState, setSaveState] = useState("idle");
   const [newsLoading, setNewsLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [displayNow, setDisplayNow] = useState(() => Date.now());
   const revision = useRef(0);
   const controller = useRef(null);
   const newsController = useRef(null);
@@ -168,9 +174,17 @@ export default function App() {
     return () => { controller.current?.abort(); newsController.current?.abort(); revision.current++; historyRevision.current++; };
   }, []);
 
+  useEffect(() => {
+    const update = () => setDisplayNow(Date.now());
+    const timer = window.setInterval(update, 5000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", update); document.removeEventListener("visibilitychange", update); };
+  }, []);
+
   function invalidate() {
     revision.current++; controller.current?.abort(); newsController.current?.abort();
-    setBusy(false); setNewsLoading(false); setResult(null); setSaveState("idle"); setNotice("");
+    setBusy(false); setNewsLoading(false); setResult(null); setSaveState("idle"); setNotice(""); setSignalLogError("");
   }
 
   function changeTicker(value) {
@@ -223,7 +237,7 @@ export default function App() {
     const post = (url, body) => request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.signal });
     try {
       const responses = await Promise.allSettled([
-        request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100`, { signal: abort.signal, cache: "no-store" }),
+        request(`/api/market-data?ticker=${encodeURIComponent(currentTicker)}&exchange=${encodeURIComponent(currentExchange)}&interval=${horizon === "week" ? "1day" : "15min"}&outputsize=100${horizon === "week" && ["usa", "stockholm"].includes(market) ? `&verify_stock=1&market=${encodeURIComponent(market)}` : ""}`, { signal: abort.signal, cache: "no-store" }),
         !override && image ? post("/api/analyze-image", { ticker: currentTicker, imageBase64: image.base64, imageMediaType: image.type, market }) : Promise.resolve(null),
         horizon === "week" && ["usa", "stockholm"].includes(market)
           ? request(`/api/market-status?market=${encodeURIComponent(market)}`, { signal: abort.signal, cache: "no-store" })
@@ -233,16 +247,28 @@ export default function App() {
       const values = responses.map((response) => response.status === "fulfilled" ? response.value : null);
       const errors = responses[0].status === "rejected" ? [`Marknadsdata: ${responses[0].reason.message}`] : [];
       if (responses[2].status === "rejected") errors.push(`Börsklocka: ${responses[2].reason.message}`);
+      const assessedAt = Date.now();
       const analysis = {
-        ticker: currentTicker, companyName: override?.name || null, horizon: horizonText, market,
+        ticker: currentTicker, companyName: override?.name || values[0]?.verified_instrument?.name || null, horizon: horizonText, horizonCode: horizon, market,
+        evaluatedAt: new Date(assessedAt).toISOString(),
         marketData: values[0], marketStatus: values[2], news: null, chart: values[1],
         newsRequested: false, newsError: null,
-        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[2] }) : null,
+        strategy: horizon === "week" ? assessSwingSetup(values[0], { ticker: currentTicker, marketStatus: values[2], now: assessedAt }) : null,
       };
-      analysis.decision = evaluateReadiness({ ...analysis, errors });
+      analysis.decision = evaluateReadiness({ ...analysis, errors, now: assessedAt });
       if (responses[1].status === "rejected") analysis.chartError = responses[1].reason.message;
       const snapshot = { ...analysis, version, record: createAnalysisRecord(analysis) };
-      setResult(snapshot); await persist(snapshot);
+      setResult(snapshot);
+      if (analysis.decision.status === "TRADE") {
+        try {
+          const entry = signalFromAnalysis(analysis, analysis.evaluatedAt);
+          await appendSignalLog(window.localStorage, navigator.locks, [entry]);
+          window.dispatchEvent(new Event("signal-log-updated"));
+        } catch (problem) {
+          if (version === revision.current) setSignalLogError(`TRADE-signalen visas, men kunde inte sparas i den lokala signalloggen: ${problem.message}`);
+        }
+      }
+      await persist(snapshot);
     } catch (error) {
       if (version === revision.current) setNotice(`Analysen misslyckades. Ingen trade godkändes: ${error.message}`);
     } finally {
@@ -280,12 +306,18 @@ export default function App() {
     await refreshHistory();
   }
 
+  const resultSignalValidity = result?.decision.status === "TRADE"
+    ? swingSignalValidity({ market: result.market, signalDate: result.strategy?.metrics?.latest_closed_candle, now: Math.max(displayNow, Date.now()) })
+    : null;
+  const resultStatus = resultSignalValidity && resultSignalValidity.status !== "CURRENT" ? "NOT_ASSESSED" : result?.decision.status;
+  const expiredResultSignal = resultSignalValidity && resultSignalValidity.status !== "CURRENT";
+
   return <main className="min-h-screen text-slate-200 p-4 md:p-8">
     <div className="max-w-3xl mx-auto space-y-5">
       <header>
         <p className="text-xs tracking-widest text-cyan-400">SWINGTRADING // ANALYSFÖRHANDSVISNING</p>
         <h1 className="text-2xl font-semibold mt-2">Sannolikhetsterminal</h1>
-        <p className="text-sm text-slate-400 mt-2">Ett analysflöde. Tydligt beslut. Hellre avstå än gissa.</p>
+        <p className="text-sm text-slate-400 mt-2">Tydliga mönster, kontrollerad risk och uppföljningsbara signaler.</p>
       </header>
       <nav className="flex flex-wrap gap-2" aria-label="Analysläge">
         <button aria-pressed={mode === "scan"} className={CONTROL} onClick={() => { invalidate(); setMode("scan"); }}>Skanna marknaden</button>
@@ -308,7 +340,7 @@ export default function App() {
           </label>
         </div>
         {mode === "analysis" && <button className="rounded bg-cyan-300 text-slate-950 px-5 py-3 font-semibold disabled:opacity-40" disabled={busy || !normalizeTicker(ticker) || Boolean(image && !image.confirmed)} onClick={() => start()}>{busy ? "Hämtar data och analyserar…" : "Starta analys"}</button>}
-        {market === "off" && <p className="text-xs text-amber-300">Marknadskontrollen är av för analysen. Detta ändrar inte datakällans börs och kringgår inte riskregler eller TRADE-spärren.</p>}
+        {market === "off" && <p className="text-xs text-amber-300">Marknadskontrollen är av för analysen. Utan verifierad börsklocka kan swinganalysen inte ge en TRADE-signal.</p>}
         {mode === "analysis" && <Details title="valfri graf">
           <p>Tickern måste vara korrekt. En uppladdad bild bevisar inte vilket instrument den visar.</p>
           <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={!normalizeTicker(ticker) || busy} onChange={selectImage} />
@@ -316,24 +348,29 @@ export default function App() {
           {image && <label className="block"><input type="checkbox" checked={image.confirmed} disabled={busy} onChange={(event) => { invalidate(); setImage({ ...image, confirmed: event.target.checked }); }} /> Jag bekräftar att grafen visar {normalizeTicker(ticker)}.</label>}
         </Details>}
       </section>
-      {mode === "scan" && <MarketScanner market={market} horizon={horizon} onSaved={refreshHistory} onAnalyze={(item) => {
+      {mode === "scan" && <MarketScanner market={market} horizon={horizon} now={displayNow} onSaved={refreshHistory} onAnalyze={(item) => {
         invalidate(); setMode("analysis"); setTicker(item.symbol); setExchange(item.exchange); setImage(null);
         if (fileInput.current) fileInput.current.value = "";
         void start(item);
       }} />}
       {notice && <p role="status" className="text-sm text-amber-300">{notice}</p>}
+      {signalLogError && <p role="alert" className="text-sm text-red-300">{signalLogError}</p>}
       {result && <section className="border border-cyan-900 rounded-lg p-4" aria-label="Samlad analys">
-        <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className="text-cyan-300 font-bold">{LABELS[result.decision.status]}{result.strategy?.status === "NOT_ASSESSED" ? " · EJ BEDÖMT" : ""}</span></div>
+        <div className="flex justify-between gap-3"><h2 className="font-semibold">{result.ticker} · Samlad analys</h2><span className={expiredResultSignal ? "text-amber-300 font-bold" : "text-cyan-300 font-bold"}>{LABELS[resultStatus] || "EJ BEDÖMT"}</span></div>
+        {resultSignalValidity && <p role="status" className={`text-sm mt-2 ${expiredResultSignal ? "text-amber-300" : "text-slate-300"}`}>{expiredResultSignal
+          ? `Den tidigare TRADE-signalen från dagskurs ${resultSignalValidity.signalDate || "okänt datum"} är inte längre aktuell. ${resultSignalValidity.status === "EXPIRED" ? "Nästa handelssession har stängt." : "Signalens sessionsdatum kunde inte verifieras."} Gör en ny analys innan du överväger en order.`
+          : `Signal baserad på stängd dagskurs ${resultSignalValidity.signalDate}. Gäller längst till stängningen ${resultSignalValidity.expirySession} kl. ${resultSignalValidity.expiryLocalClose} lokal börstid. Kontrollera då aktuell kurs och gör en ny analys.`}</p>}
         <ul className="text-sm text-slate-300 mt-3 space-y-1 list-disc pl-5">{result.decision.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-        {result.strategy && <SwingDataCheck result={result} />}
+        {result.strategy && <SwingDataCheck result={result} signalValidity={resultSignalValidity} />}
         {result.strategy && <div className="border border-slate-800 rounded p-3 mt-3" aria-label="Experimentell swingbedömning">
-          <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className="text-cyan-300">{result.strategy.status === "WATCH" ? "BEVAKA" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
-          <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.join(" + ") : "ingen regel uppfylld"}</p>
+          <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className={expiredResultSignal ? "text-amber-300" : "text-cyan-300"}>{expiredResultSignal ? "HISTORISKT UPPLÄGG" : result.strategy.status === "WATCH" ? "UPPLÄGG HITTAT" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
+          <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.map((setup) => SETUP_LABELS[setup] || setup).join(" + ") : "ingen regel uppfylld"}</p>
           {result.strategy.metrics?.latest_closed_candle && <p className="text-xs text-slate-400 mt-1">Bedömd stängd dagskurs: {result.strategy.metrics.latest_closed_candle}{result.marketData?.excluded_current_session ? " · dagens ofärdiga kurs uteslöts" : ""}.</p>}
           <ul className="text-sm mt-2 list-disc pl-5">{result.strategy.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-          {result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}
-          {result.strategy.status === "WATCH" && <p className="text-sm text-cyan-300 mt-2">Paperkandidat för swing: lås upplägget i paperloggen innan nästa session öppnar. Om du testar i TradingView, registrera det fiktiva köpets faktiska fyllnadspris separat i paperloggen.</p>}
-          <p className="text-xs text-amber-300 mt-2">Bevakningen är oprövad och använder ännu inget referensfilter. Nivåerna och positionskalkylen är provisoriska och godkänner aldrig en trade.</p>
+          {!expiredResultSignal && result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}
+          {resultStatus === "TRADE" && <p className="text-sm text-cyan-300 mt-2">Teknisk TRADE-signal för ett kommande ingångsläge. Kontrollera faktiskt pris mot stop och mål innan en order. Du väljer själv om du handlar; terminalen lägger ingen order.</p>}
+          {result.strategy.status === "WATCH" && resultStatus !== "TRADE" && !expiredResultSignal && <p className="text-sm text-amber-300 mt-2">Ett mönster hittades men slutbedömningen godkände ingen signal. Se orsaken ovan.</p>}
+          <p className="text-xs text-amber-300 mt-2">Reglerna är experimentella och deras träffsäkerhet är inte uppmätt. Stop och positionskalkyl begränsar planerad risk men skyddar inte mot gap och slippage.</p>
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
         </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
@@ -341,12 +378,12 @@ export default function App() {
         {(!result.news || result.newsError) && <button className={`${CONTROL} mt-3 disabled:opacity-40`} disabled={newsLoading} onClick={() => loadOptionalNews(result)}>{newsLoading ? "Hämtar valfri nyhetsbakgrund…" : result.newsError ? "Försök hämta nyhetsbakgrund igen" : "Hämta valfri nyhetsbakgrund"}</button>}
         <p className="text-xs text-slate-400 mt-2">Nyhetsbakgrunden hämtas separat efter beslutet och sparas inte i journalposten.</p>
         <NewsEvidence news={result.news} />
-        <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysförslaget är sparat i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analysförslag…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad. Paperloggen sparas separat i webbläsaren." : "Inte sparat i journalen."}</p>
+        <p role="status" className="text-xs text-slate-400 mt-3">{saveState === "saved" ? "Analysen och beslutet är sparade i journalen. Ingen faktisk trade har registrerats." : saveState === "saving" ? "Sparar analys…" : saveState === "read_only" ? "Analysen visas här, men previewns gemensamma journal är skrivskyddad." : "Inte sparat i journalen."}</p>
         {saveState === "failed" && <button className={`${CONTROL} mt-2`} onClick={() => persist(result)}>Försök spara igen</button>}
         {saveState === "saved" && <RealTradeForm key={result.record.trade_id} analysis={result} onSave={saveRealTrade} />}
         <Details title="nyheter, graf och data">
           <h3 className="font-semibold">Nyheter · valfri bakgrund</h3><p className="whitespace-pre-wrap">{result.news?.reasoning || (newsLoading ? "Nyheter hämtas separat…" : result.newsRequested ? "Nyhetsanalysen kunde inte hämtas." : "Nyheter hämtades inte för den här analysen.")}</p>
-          <p className="text-xs text-slate-400">Nyhetsinformationen påverkar inte AVVAKTA/NO TRADE och är inte en validerad handelssignal.</p>
+          <p className="text-xs text-slate-400">Nyhetsinformationen påverkar inte TRADE/NO TRADE och är inte en validerad handelssignal.</p>
           {result.news?.magnitude_note && <p>{result.news.magnitude_note}</p>}
           <ul className="list-disc pl-5">{result.news?.key_news?.map((item, index) => <li key={index}>[{item.impact}] {item.headline}</li>)}</ul>
           <p className="text-xs text-slate-400">AI:ns riktningssäkerhet: {result.news?.direction_confidence ?? "saknas"}. Detta är inte uppmätt träffsäkerhet eller sannolikhet för vinst.</p>
@@ -369,7 +406,7 @@ export default function App() {
           const decision = trade.signal_inputs?.decision;
           const scanAssessment = { NOT_ASSESSED: "ej bedömt", PARTIALLY_ASSESSED: "delvis bedömt", ASSESSED: "bedömt" }[trade.signal_inputs?.scan_status];
           return <article key={trade.trade_id} className="py-3 text-sm">
-            <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? LABELS[decision?.status] || "NO TRADE" : realTrade ? `Faktisk trade · ${trade.direction}` : `Äldre post · ${trade.signal}`}</span></div>
+            <div className="flex justify-between gap-3"><span>{trade.ticker}</span><span>{scan ? "Skanningsrapport" : analysis ? `Historiskt analysförslag · ${LABELS[decision?.status] || "EJ BEDÖMT"}` : realTrade ? `Faktisk trade · ${trade.direction}` : `Äldre post · ${trade.signal}`}</span></div>
             <p className="text-xs text-slate-400 mt-1">{new Date(trade.timestamp).toLocaleString("sv-SE")} · {scan ? `${trade.signal_inputs.checked} aktier kontrollerade · ${trade.signal_inputs.complete ? "komplett urval" : "ofullständig"}${scanAssessment ? ` · ${scanAssessment}` : ""}` : analysis ? "Analysförslag" : realTrade ? trade.trade_status : trade.trade_status}</p>
             {realTrade && trade.trade_status === "CLOSED" && Number.isFinite(trade.result_percent) && <p>Nettoresultat: {trade.result_percent.toFixed(2)}%{Number.isFinite(trade.result_r) ? ` · ${trade.result_r.toFixed(2)}R` : ""} · {trade.winner === null ? "break-even" : trade.winner ? "vinst" : "förlust"}</p>}
             {realTrade && trade.trade_status === "OPEN" && <CloseTradeForm trade={trade} onClose={closeRealTrade} />}
@@ -377,7 +414,8 @@ export default function App() {
           </article>;
         })}</div>
       </section>
-      <PaperJournal latestAnalysis={result} />
+      <SignalJournal />
+      <PaperJournal latestAnalysis={expiredResultSignal ? null : result} />
       <footer className="text-xs text-slate-500">Prototyp, inte en validerad handelsstrategi. Risk Engine, personlig tradeuppföljning och produktdata för derivat återstår. Ingen träffsäkerhet utlovas.</footer>
     </div>
   </main>;

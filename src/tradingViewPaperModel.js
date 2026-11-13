@@ -2,6 +2,9 @@ import { getMarketStatus } from "../api/_market-hours.js";
 import { PAPER_BASIS, PAPER_VERSION, validatePaperObservation } from "./paperModel.js";
 
 export const TRADINGVIEW_PAPER_VERSION = "tradingview-paper-v1";
+const HISTORICAL_PAPER_VERSION = "paper-forward-v0.3";
+const HISTORICAL_SETUPS = new Set(["PULLBACK", "BREAKOUT"]);
+const CURRENT_SETUPS = new Set([...HISTORICAL_SETUPS, "RANGE_BREAKOUT", "REBOUND"]);
 const DAY_MS = 86_400_000;
 const CLOCK_SKEW_MS = 120_000;
 const LATE_LOG_MS = 30 * 60_000;
@@ -51,8 +54,8 @@ export function tradingViewPaperSignalKey(order) {
 /** Validates structure and arithmetic; local manual entries are not broker-verified. */
 export function validateTradingViewPaperOrder(order) {
   if (!order || typeof order !== "object" || Array.isArray(order) || order.version !== TRADINGVIEW_PAPER_VERSION || !["OPEN", "CLOSED"].includes(order.status) || order.direction !== "LONG") return false;
-  if (typeof order.sourcePaperObservationId !== "string" || !order.sourcePaperObservationId.startsWith("paper:") || order.id !== `tvpaper:${order.sourcePaperObservationId}` || order.sourcePaperVersion !== PAPER_VERSION || order.basis !== PAPER_BASIS.TECHNICAL_ONLY) return false;
-  if (!["usa", "stockholm"].includes(order.market) || typeof order.ticker !== "string" || !/^[A-Z0-9.\-]{1,24}$/.test(order.ticker) || typeof order.exchange !== "string" || !order.exchange.trim() || typeof order.strategyVersion !== "string" || !order.strategyVersion.trim() || !["PULLBACK", "BREAKOUT"].includes(order.setup)) return false;
+  if (typeof order.sourcePaperObservationId !== "string" || !order.sourcePaperObservationId.startsWith("paper:") || order.id !== `tvpaper:${order.sourcePaperObservationId}` || ![PAPER_VERSION, HISTORICAL_PAPER_VERSION].includes(order.sourcePaperVersion) || order.basis !== PAPER_BASIS.TECHNICAL_ONLY) return false;
+  if (!["usa", "stockholm"].includes(order.market) || typeof order.ticker !== "string" || !/^[A-Z0-9.\-]{1,24}$/.test(order.ticker) || typeof order.exchange !== "string" || !order.exchange.trim() || typeof order.strategyVersion !== "string" || !order.strategyVersion.trim() || !(order.sourcePaperVersion === PAPER_VERSION ? CURRENT_SETUPS : HISTORICAL_SETUPS).has(order.setup)) return false;
   if ((order.market === "usa" && (order.currency !== "USD" || order.timezone !== "America/New_York")) || (order.market === "stockholm" && (order.currency !== "SEK" || order.timezone !== "Europe/Stockholm"))) return false;
   if (!validDate(order.signalDate) || !isoTime(order.sourceRecordedAt) || !isoTime(order.entryAt) || !isoTime(order.entryRecordedAt)) return false;
   const entryTime = Date.parse(order.entryAt);

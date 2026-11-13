@@ -3,8 +3,9 @@ import PaperCloudPanel from "./PaperCloudPanel.jsx";
 import TradingViewPaperLedger from "./TradingViewPaperLedger.jsx";
 import { resolvePaperCloudConfig } from "./paperCloudClient.js";
 import { MAX_PAPER_FOLLOWUP_SYMBOLS, planPaperFollowup, runPaperFollowup } from "./paperFollowup.js";
-import { PAPER_BASIS, createPaperObservation, paperObservationBasis, summarizePaperObservations } from "./paperModel.js";
+import { PAPER_BASIS, PAPER_VERSION, createPaperObservation, paperObservationBasis, summarizePaperObservations } from "./paperModel.js";
 import { PAPER_STORAGE_KEY, decodePaperLog, encodePaperLog, findDuplicatePaperSignal, loadPaperLog, mergePaperLogs, updatePaperLog } from "./paperStorage.js";
+import { attachPaperOutcomes } from "./signalLog.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
 const LABELS = { PENDING_ENTRY: "Väntar på framtida dagskurs", PENDING_OPEN: "Öppen simulering", REJECTED_ENTRY: "Ingång avvisad", CLOSED: "Simulerat avslutad", NOT_ASSESSED: "Kan inte bedömas med nuvarande data" };
@@ -68,7 +69,7 @@ export default function PaperJournal({ latestAnalysis }) {
       });
       setState({ records: next, storageError: "" });
       setNotice(technicalOnly
-        ? "Det tekniska upplägget är låst och sparat lokalt. Nyheter påverkar inte beslutet; ingen affär har genomförts."
+        ? "TRADE-signalens tekniska upplägg är låst och sparat lokalt. Nyheter påverkar inte beslutet; ingen order har lagts."
         : "Bevakningskandidaten är låst och sparad lokalt. Den är ingen TRADE-signal eller genomförd affär.");
     } catch (problem) { setError(problem.message); }
   }
@@ -112,15 +113,22 @@ export default function PaperJournal({ latestAnalysis }) {
     setFollowupBusy(true); setError(""); setNotice("");
     try {
       const result = await runPaperFollowup({ storage: window.localStorage, lockManager: navigator.locks });
-      setState({ records: loadPaperLog(window.localStorage), storageError: "" });
+      const records = loadPaperLog(window.localStorage);
+      setState({ records, storageError: "" });
+      let signalLinkError = "";
+      try {
+        const linked = await attachPaperOutcomes(window.localStorage, navigator.locks, records);
+        if (linked > 0) window.dispatchEvent(new Event("signal-log-updated"));
+      } catch (problem) { signalLinkError = `Paperutfallen sparades, men kunde inte länkas till signalloggen: ${problem.message}`; }
       setFollowupClock(Date.now());
       if (result.error) {
-        setError(`Uppföljningen stoppades vid ${result.error.ticker}: ${result.error.message} ${result.checkedSymbols} instrument hann kontrolleras. Redan sparade uppdateringar finns kvar lokalt.`);
+        setError(`Uppföljningen stoppades vid ${result.error.ticker}: ${result.error.message} ${result.checkedSymbols} instrument hann kontrolleras. Redan sparade uppdateringar finns kvar lokalt. ${signalLinkError}`);
       } else if (result.attemptedRequests === 0) {
         setNotice("Ingen ny stängd handelssession finns att kontrollera för de öppna observationerna ännu. Inga dataanrop gjordes.");
       } else {
         setNotice(`${result.checkedSymbols} instrument kontrollerades med ${result.attemptedRequests} dataanrop; ${result.updatedRecords} observationer uppdaterades lokalt. ${result.deferredSymbols ? `${result.deferredSymbols} instrument återstår till nästa kontroll. ` : ""}Exportera gärna en JSON-kopia som backup.`);
       }
+      if (!result.error && signalLinkError) setError(signalLinkError);
     } catch (problem) {
       setError(`Paperuppföljningen kunde inte slutföras: ${problem.message}`);
     } finally { setFollowupBusy(false); }
@@ -133,11 +141,11 @@ export default function PaperJournal({ latestAnalysis }) {
     <p className="text-xs text-slate-400">{CLOUD_ENABLED
       ? "Paperobservationer sparas i den här webbläsaren. Exportera en JSON-kopia som backup. Valfri molnsynk kan öppnas nedan om du senare vill flytta loggen."
       : "Paperobservationer sparas bara i den här webbläsaren på denna preview-adress. De synkas inte mellan datorer eller till Supabase. Exportera en JSON-kopia för att flytta eller säkerhetskopiera loggen."}</p>
-    <p className="text-xs text-amber-300">En paperobservation är en förhandslåst simulering, ingen TRADE-signal eller riktig order. Statistiken bygger på lokalt skapade eller importerade poster utan oberoende verifiering. Endast avslutade simuleringar får ett vinst- eller förlustutfall; NO TRADE räknas aldrig som vinst.</p>
+    <p className="text-xs text-amber-300">En paperobservation följer en förhandslåst TRADE-signal; den är ingen order eller garanti för vinst. Statistiken bygger på lokalt skapade eller importerade poster utan oberoende verifiering. Endast avslutade simuleringar får ett vinst- eller förlustutfall; NO TRADE räknas aldrig som vinst.</p>
     {candidate && <details className="border-t border-slate-800 pt-3">
-      <summary className="cursor-pointer text-cyan-300">{technicalOnly ? "Spara teknisk BEVAKA-kandidat lokalt" : "Spara aktuell BEVAKA-kandidat lokalt"}</summary>
-      {technicalOnly && <p className="text-xs text-amber-300 mt-3">Detta är en teknisk paperobservation för att mäta upplägget. Nyheter påverkar inte beslutet. AVVAKTA är ingen godkänd TRADE-signal eller order.</p>}
-      {selectedPlan && <p className="text-xs text-cyan-300 mt-2">TradingView-paperprov: signalens referenspris {formatted(selectedPlan.entry_reference)}, stopp {formatted(selectedPlan.stop)} och mål {formatted(selectedPlan.target)} {latestAnalysis.marketData?.currency}. Ett fiktivt köp nästa session räknas bara som inom planen när fyllnadspriset ligger över stopp och under mål. Terminalen lägger ingen order.</p>}
+      <summary className="cursor-pointer text-cyan-300">{technicalOnly ? "Spara teknisk TRADE-signal för uppföljning" : "Spara aktuell signal för uppföljning"}</summary>
+      {technicalOnly && <p className="text-xs text-amber-300 mt-3">Nyheter påverkar inte den tekniska TRADE-signalen. Observationen mäter ett experimentellt upplägg och innebär ingen order.</p>}
+      {selectedPlan && <p className="text-xs text-cyan-300 mt-2">Signalens referenspris {formatted(selectedPlan.entry_reference)}, stopp {formatted(selectedPlan.stop)} och mål {formatted(selectedPlan.target)} {latestAnalysis.marketData?.currency}. Ett köp nästa session räknas bara som inom planen när priset ligger över stopp och under mål. Terminalen lägger ingen order.</p>}
       <p className="text-xs text-slate-400 mt-3">Lås observationen efter den valda börsens stängning, innan nästa handelssession öppnar. Använd samma innehavstid, antal, avgift och slippage under testet så att resultaten går att jämföra.</p>
       <form className="grid gap-3 sm:grid-cols-2 mt-3 text-sm" onSubmit={saveCandidate}>
         <label>Upplägg<select className={`${CONTROL} block w-full mt-1`} value={selectedSetup} onChange={(event) => setSetup(event.target.value)}>{plans.map((plan) => <option value={plan.setup} key={plan.setup}>{plan.setup}</option>)}</select></label>
@@ -179,7 +187,7 @@ export default function PaperJournal({ latestAnalysis }) {
     {state.records.length > 0 && <details className="border-t border-slate-800 pt-3 text-sm"><summary className="cursor-pointer text-cyan-300">Se paperobservationer</summary>
       <div className="divide-y divide-slate-800 mt-2">{[...state.records].reverse().slice(0, 20).map((record) => <article key={record.id} className="py-2">
         <p className="font-medium">{record.ticker} · {record.setup} · {LABELS[record.status] || record.status}</p>
-        <p className="text-xs text-slate-400">Signal {record.signalDate} · {record.strategyVersion} · {record.currency} · max {record.holdingSessions} sessioner · {record.version === "paper-forward-v0.3" ? "tekniskt AVVAKTA, nyheter ej beslutsgrundande" : record.basis === PAPER_BASIS.TECHNICAL_ONLY ? "äldre tekniskt test, NO TRADE" : "äldre test med nyhetsanalys"}</p>
+        <p className="text-xs text-slate-400">Signal {record.signalDate} · {record.strategyVersion} · {record.currency} · max {record.holdingSessions} sessioner · {record.version === PAPER_VERSION ? "teknisk TRADE, nyheter ej beslutsgrundande" : record.version === "paper-forward-v0.3" ? "äldre tekniskt AVVAKTA" : record.basis === PAPER_BASIS.TECHNICAL_ONLY ? "äldre tekniskt test, NO TRADE" : "äldre test med nyhetsanalys"}</p>
         {record.status === "CLOSED" && <p>Simulerat netto {formatted(record.netPnl)} {record.currency} · {formatted(record.resultR)}R · utgång {record.exitDate}.</p>}
         {record.status === "NOT_ASSESSED" && <p className="text-xs text-amber-300">{record.assessmentError}</p>}
       </article>)}</div>

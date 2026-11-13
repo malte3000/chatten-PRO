@@ -24,7 +24,7 @@ function observation(analysisId = "TEST-analysis-1") {
     return { datetime, open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: index === 99 ? 1_500_000 : 1_000_000 };
   });
   const marketData = { ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: "2026-09-28T20:59:00.000Z", bars };
-  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" },
+  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" },
     marketData, strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(signalTime)), now: signalTime }),
     record: { trade_id: analysisId, signal_inputs: { record_type: "ANALYSIS" } } };
   assert.equal(analysis.strategy.status, "WATCH");
@@ -57,6 +57,17 @@ test("a TradingView buy is a separate manual paper fill tied to the locked signa
   assert.equal(order.entryLateLogged, false);
   assert.equal(order.netPnl, null);
   assert.ok(validateTradingViewPaperOrder(order));
+});
+
+test("existing v0.3 manual paper orders remain readable and closable", () => {
+  const historical = { ...entry(), sourcePaperVersion: "paper-forward-v0.3", strategyVersion: "swing-v0.3-experimental" };
+  assert.equal(validateTradingViewPaperOrder(historical), true);
+  const memory = storage();
+  saveTradingViewPaperOrders(memory, [historical]);
+  assert.deepEqual(loadTradingViewPaperOrders(memory), [historical]);
+  const closed = closeTradingViewPaperEntry(historical, { exitAt: sellTime, exitPrice: 151, exitQuantity: 2, exitFee: 1 }, { recordedAt: sellLogged });
+  assert.equal(validateTradingViewPaperOrder(closed), true);
+  assert.equal(validateTradingViewPaperOrder({ ...historical, setup: "REBOUND" }), false);
 });
 
 test("entry rejects retrospective wrong-session fills, off-hours times, future timestamps and missing costs", () => {

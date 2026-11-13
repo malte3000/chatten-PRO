@@ -5,7 +5,7 @@ import handler from "../api/scan.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 
 function response() { return { code: 200, headers: {}, setHeader(key, value) { this.headers[key] = value; }, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } }; }
-function setup(t) {
+function setup(t, sessionMs = 60000) {
   const originalFetch = globalThis.fetch;
   const keys = ["APP_LOGIN_PASSWORD", "TWELVE_DATA_API_KEY", "SCAN_BATCH_SIZE"];
   const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -13,7 +13,7 @@ function setup(t) {
   process.env.TWELVE_DATA_API_KEY = "test-only-key";
   process.env.SCAN_BATCH_SIZE = "4";
   t.after(() => { globalThis.fetch = originalFetch; for (const key of keys) { if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key]; } });
-  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + 60000 })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + sessionMs })).toString("base64url");
   const signature = crypto.createHmac("sha256", process.env.APP_LOGIN_PASSWORD).update(payload).digest("base64url");
   return { cookie: `chatten_pro_session=${payload}.${signature}` };
 }
@@ -83,6 +83,7 @@ test("Swedish scan excludes obvious products and separates valid candidates from
     if (request.pathname === "/stocks") return { ok: true, json: async () => ({ data: [
       { symbol: "DEMO", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "SEK", type: "Common Stock" },
       { symbol: "OTHER", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "SEK", type: "Common Stock" },
+      { symbol: "NOKSTOCK", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "NOK", type: "Common Stock" },
       { symbol: "BULL.EVO.X6.AVA.4", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "SEK", type: "Common Stock" },
       { symbol: "MINI.L.WDC.AVA.01", exchange: "OMX", mic_code: "XSTO", country: "Sweden", currency: "SEK", type: "Common Stock" },
     ] }) };
@@ -102,7 +103,7 @@ test("Swedish scan excludes obvious products and separates valid candidates from
   assert.equal(res.data.universe_size, 2);
   const candidate = res.data.results.find((item) => item.symbol === "DEMO");
   const unavailable = res.data.results.find((item) => item.symbol === "OTHER");
-  assert.equal(candidate.status, "WAIT");
+  assert.equal(candidate.status, "TRADE");
   assert.deepEqual(candidate.screening_setups, ["BREAKOUT"]);
   assert.equal(candidate.metrics.rvol, 2);
   assert.equal(candidate.metrics.atr, 2);
@@ -137,4 +138,56 @@ test("Swedish scan aborts after first wholly unassessed batch without claiming N
   assert.match(res.data.error, /utan tradebedömning/);
   assert.equal(JSON.stringify(res.data).includes("NO_TRADE"), false);
   assert.equal(timeCalls, 1);
+});
+
+test("scanner skips unsupported currencies before fetching series and paginates a stable daily selection", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 86400000 });
+  const headers = setup(t, 10 * 60000);
+  const listed = Array.from({ length: 8 }, (_, index) => ({
+    symbol: `TEST${index + 1}`, exchange: "NASDAQ", country: "United States",
+    currency: "USD", type: "Common Stock",
+  }));
+  let stockRequests = 0;
+  const seriesRequests = [];
+  globalThis.fetch = async (url) => {
+    const request = new URL(url);
+    if (request.pathname === "/stocks") {
+      stockRequests++;
+      return { ok: true, status: 200, json: async () => ({ data: [
+        ...listed,
+        { ...listed[0], symbol: "CADSTOCK", currency: "CAD" },
+        { ...listed[0], symbol: "NOCURRENCY", currency: undefined },
+      ] }) };
+    }
+    const symbols = request.searchParams.get("symbol").split(",");
+    seriesRequests.push(symbols);
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+
+  const first = response();
+  await handler({ method: "POST", headers, body: { ...body, limit: 8 } }, first);
+  assert.equal(first.code, 200);
+  assert.equal(first.data.universe_size, 8);
+  assert.equal(first.data.next_offset, 4);
+  assert.equal(first.data.done, false);
+  assert.equal(seriesRequests[0].length, 4);
+
+  t.mock.timers.tick(62000);
+  const second = response();
+  await handler({ method: "POST", headers, body: { ...body, offset: 4, limit: 8 } }, second);
+  assert.equal(second.code, 200);
+  assert.equal(second.data.next_offset, 8);
+  assert.equal(second.data.done, true);
+  assert.equal(seriesRequests[1].length, 4);
+
+  const selected = [...seriesRequests[0], ...seriesRequests[1]];
+  assert.equal(new Set(selected).size, 8);
+  assert.deepEqual(new Set(selected), new Set(listed.map((item) => `${item.symbol}:${item.exchange}`)));
+
+  t.mock.timers.tick(62000);
+  const repeated = response();
+  await handler({ method: "POST", headers, body: { ...body, limit: 8 } }, repeated);
+  assert.equal(repeated.code, 200);
+  assert.deepEqual(seriesRequests[2], seriesRequests[0]);
+  assert.equal(stockRequests, 1);
 });

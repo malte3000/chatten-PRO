@@ -1,10 +1,11 @@
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
-import { assessSwingSetup, SWING_STRATEGY_VERSION } from "./strategyModel.js";
+import { assessSwingSetup, SWING_SETUP_IDS, SWING_STRATEGY_VERSION } from "./strategyModel.js";
 import { assessMarketContext } from "./marketContext.js";
+import { assessSwingViability } from "./swingViability.js";
 
-export const REPLAY_VERSION = "daily-replay-v0.1-experimental";
-const SETUPS = new Set(["PULLBACK", "BREAKOUT"]);
+export const REPLAY_VERSION = "daily-replay-v0.3-experimental";
+const SETUPS = new Set(SWING_SETUP_IDS);
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
 function summarize(trades) {
@@ -38,7 +39,7 @@ function summarize(trades) {
 // A pending signal contains only information available at the previous close.
 export function runSwingReplay({ marketData, benchmarkData = null, benchmarkTicker = null, market = "usa", setup, holdingSessions, quantity, feePerOrder, slippageBps, marketContextMode = "off", asOf = Date.now() } = {}) {
   const invalid = (reason) => ({ version: REPLAY_VERSION, status: "INVALID", reasons: [reason], closedTrades: [], openTrades: [], rejectedSignals: [], decisions: [], metrics: summarize([]) });
-  if (!SETUPS.has(setup) || !["usa", "stockholm"].includes(market) || !["off", "required"].includes(marketContextMode)) return invalid("Välj pullback eller breakout, stödd marknad och giltigt referensfilter.");
+  if (!SETUPS.has(setup) || !["usa", "stockholm"].includes(market) || !["off", "required"].includes(marketContextMode)) return invalid("Välj ett aktuellt swingupplägg, stödd marknad och giltigt referensfilter.");
   if (!Number.isInteger(holdingSessions) || holdingSessions < 1 || holdingSessions > 5 || !Number.isSafeInteger(quantity) || quantity < 1 || !finite(feePerOrder) || feePerOrder < 0 || !finite(feePerOrder * 2) || !finite(slippageBps) || slippageBps < 0 || slippageBps >= 10000) return invalid("Ange 1–5 observerade sessioner, exakt positivt helt aktieantal, avgift per order och slippage 0–9999 baspunkter.");
   const asOfTime = typeof asOf === "number" ? asOf : Date.parse(asOf);
   if (!Number.isFinite(asOfTime) || !Number.isFinite(new Date(asOfTime).getTime())) return invalid("Provets slutklocka är ogiltig.");
@@ -46,7 +47,8 @@ export function runSwingReplay({ marketData, benchmarkData = null, benchmarkTick
   const selection = selectClosedDailyBars(marketData, { marketStatus: clock, now: asOfTime });
   if (!selection.valid) return invalid(selection.reasons.join(" "));
   const bars = selection.bars;
-  if (bars.length < 61 || bars.length > 5000 || !String(marketData.ticker || "").trim() || !String(marketData.currency || "").trim()) return invalid("Minst 61 och högst 5000 stängda dagsljus samt ticker och valuta krävs.");
+  if (bars.length < 61 || bars.length > 5000 || !String(marketData.ticker || "").trim() ||
+      marketData.currency !== (market === "usa" ? "USD" : "SEK")) return invalid("Minst 61 och högst 5000 stängda dagsljus samt ticker och rätt marknadsvaluta krävs.");
   if (marketContextMode === "required" && (!benchmarkData || !benchmarkTicker)) return invalid("Referensdata och dess ticker krävs när marknadsfiltret är på.");
   if (marketContextMode === "required" && (!Array.isArray(benchmarkData.bars) || benchmarkData.bars.some((bar) => !bar || typeof bar.datetime !== "string"))) return invalid("Referensdatan saknar giltiga daterade dagsljus.");
 
@@ -92,14 +94,17 @@ export function runSwingReplay({ marketData, benchmarkData = null, benchmarkTick
     const assessment = assessSwingSetup(prefix, { ticker: marketData.ticker, marketStatus: decisionClock, now: decisionTime });
     const plan = assessment.plans.find((candidate) => candidate.setup === setup);
     if (!plan) continue;
+    const viability = assessSwingViability(prefix.bars, assessment.metrics.atr, market);
     let context = null;
-    if (marketContextMode === "required") {
+    if (viability.status === "PASS" && marketContextMode === "required") {
       // Slice at the decision date before computing indicators or date joins.
       const benchmarkPrefix = { ...benchmarkData, bars: Array.isArray(benchmarkData.bars) ? benchmarkData.bars.filter((candidate) => candidate.datetime <= bar.datetime) : null };
       context = assessMarketContext(prefix, benchmarkPrefix, { ticker: marketData.ticker, benchmarkTicker, marketStatus: decisionClock, now: decisionTime });
     }
-    decisions.push({ signalDate: bar.datetime, setup, plan: { ...plan }, context });
-    if (context && context.status !== "CONFIRMED") {
+    decisions.push({ signalDate: bar.datetime, setup, plan: { ...plan }, viability, context });
+    if (viability.status !== "PASS") {
+      rejectedSignals.push({ signalDate: bar.datetime, reason: `Livefilter: ${viability.reasons.join(" ")}` });
+    } else if (context && context.status !== "CONFIRMED") {
       rejectedSignals.push({ signalDate: bar.datetime, reason: `Marknadsfilter: ${context.reasons.join(" ")}` });
     } else if (index === bars.length - 1) {
       rejectedSignals.push({ signalDate: bar.datetime, reason: "Ingen senare observerad session finns för ingång." });
@@ -117,6 +122,7 @@ export function runSwingReplay({ marketData, benchmarkData = null, benchmarkTick
     options: { market, setup, holdingSessions, quantity, feePerOrder, slippageBps, marketContextMode },
     assumptions: [
       "Tekniskt prisprov av experimentella LONG-regler. Historiska nyheter, AI och aktieurval ingår inte.",
+      "Samma omsättnings- och ATR-gränser som liveanalysen prövas vid varje historisk signal.",
       "Signal på stängningsdata; ingång tidigast nästa observerade dagsljus vid open plus slippage. En position åt gången.",
       "Signalen behåller sin stop. Mål och R räknas om från faktisk simulerad ingång. Ogiltiga ingångsgap avvisas.",
       "Stop kontrolleras före mål om båda träffas i samma dagsljus. Mål är en beröringsutlöst marketexit, inte en garanterad limitfill.",

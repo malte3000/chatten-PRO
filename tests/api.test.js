@@ -67,6 +67,57 @@ test("market data translates a provider timeout into a clear gateway timeout", a
   assert.match(res.data.message, /15 sekunder/);
 });
 
+test("manual swing analysis verifies a common stock before accepting daily bars", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-28T21:00:00Z") });
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  const paths = [];
+  globalThis.fetch = async (url) => {
+    const request = new URL(url);
+    paths.push(request.pathname);
+    if (request.pathname === "/stocks") {
+      assert.equal(request.searchParams.get("symbol"), "AAPL");
+      assert.equal(request.searchParams.get("type"), "Common Stock");
+      assert.equal(request.searchParams.get("country"), "United States");
+      return { ok: true, status: 200, json: async () => ({ data: [
+        { symbol: "AAPL", name: "Apple Inc", type: "Common Stock", exchange: "NASDAQ", country: "United States", currency: "USD" },
+      ] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({
+      meta: { symbol: "AAPL", exchange: "NASDAQ", currency: "USD", exchange_timezone: "America/New_York", interval: "1day" },
+      values: [{ datetime: "2026-09-28", open: "100", high: "102", low: "99", close: "101", volume: "1000000" }],
+    }) };
+  };
+  const res = response();
+  await marketDataHandler({ method: "GET", headers, query: { ticker: "AAPL", market: "usa", verify_stock: "1", interval: "1day" } }, res);
+  assert.equal(res.code, 200);
+  assert.deepEqual(paths, ["/stocks", "/time_series"]);
+  assert.deepEqual(res.data.verified_instrument, {
+    symbol: "AAPL", name: "Apple Inc", exchange: "NASDAQ", type: "Common Stock",
+    country: "United States", currency: "USD",
+  });
+});
+
+test("manual swing analysis rejects ETFs and suspicious products before spending time-series credits", async (t) => {
+  const headers = setup(t);
+  process.env.TWELVE_DATA_API_KEY = "test-only-market-key";
+  for (const item of [
+    { symbol: "SPY", name: "SPDR", type: "ETF", exchange: "NYSE", country: "United States", currency: "USD" },
+    { symbol: "SPY", name: "Bull Certificate", type: "Common Stock", exchange: "NYSE", country: "United States", currency: "USD" },
+  ]) {
+    let calls = 0;
+    globalThis.fetch = async (url) => {
+      calls += 1;
+      assert.equal(new URL(url).pathname, "/stocks");
+      return { ok: true, status: 200, json: async () => ({ data: [item] }) };
+    };
+    const res = response();
+    await marketDataHandler({ method: "GET", headers, query: { ticker: "SPY", market: "usa", verify_stock: "1", interval: "1day" } }, res);
+    assert.equal(res.code, 422);
+    assert.equal(calls, 1);
+  }
+});
+
 test("exchange clock is never cached", () => {
   const res = response();
   marketStatusHandler({ method: "GET", query: { market: "usa" } }, res);

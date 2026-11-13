@@ -1,30 +1,27 @@
 import { validateMarketBars } from "../api/_market-data-validation.js";
 import { getMarketStatus } from "../api/_market-hours.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
+import { evaluateReadiness } from "./analysisModel.js";
+import { ema } from "./indicators.js";
+import { evaluateSwingPatterns, SWING_STRATEGY_VERSION } from "./strategyModel.js";
 
-export const SCREEN_VERSION = "v0.6-experimental";
-
-export function ema(values, period) {
-  if (values.length < period) return null;
-  let value = values.slice(0, period).reduce((sum, item) => sum + item, 0) / period;
-  const alpha = 2 / (period + 1);
-  for (const item of values.slice(period)) value += alpha * (item - value);
-  return value;
-}
+export { ema } from "./indicators.js";
+export const SCREEN_VERSION = "v0.7-experimental";
 
 export function screenInstrument(instrument, marketData, { horizon = "week", market = null, now = Date.now() } = {}) {
   const reasons = [];
-  const base = { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, screening_selection: null, screening_setups: [], data_issue: null };
+  const base = { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons, screen_version: SCREEN_VERSION, swing_strategy_version: horizon === "week" ? SWING_STRATEGY_VERSION : null, screening_selection: null, screening_setups: [], screening_plans: [], primary_setup: null, signal_plan: null, decision: null, data_issue: null };
   const unavailable = (code, reason) => { base.data_issue = code; reasons.push(reason); return base; };
   const sourceBars = marketData?.bars;
   if (marketData?.ticker !== instrument.symbol) return unavailable("INSTRUMENT_MISMATCH", "Kursdatan matchar inte den valda aktien.");
   if (!Array.isArray(sourceBars) || sourceBars.length < 60) return unavailable("INSUFFICIENT_BARS", "Minst 60 giltiga candles för rätt instrument krävs.");
   let bars = sourceBars;
+  let marketStatus = null;
   if (horizon === "week") {
     if (!["usa", "stockholm"].includes(market) || !Number.isFinite(now)) {
       return unavailable("MARKET_CLOCK_UNVERIFIED", "Tillförlitlig börsklocka saknas för färdigställda dagskurser.");
     }
-    const marketStatus = getMarketStatus(market, new Date(now));
+    marketStatus = getMarketStatus(market, new Date(now));
     // The current session may have zero volume or an unfinished OHLC range.
     // Exclude it before validating the completed bars used for screening.
     const unfinishedDate = marketStatus.reason === "after_close" ? null : marketStatus.sessionDate;
@@ -46,6 +43,10 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
   }
   if (bars.some((bar) => !Number.isFinite(bar.volume) || bar.volume <= 0)) {
     return unavailable("UNRELIABLE_VOLUME", "Tillförlitlig volymdata saknas.");
+  }
+  const swingAssessment = horizon === "week" ? evaluateSwingPatterns(bars) : null;
+  if (swingAssessment?.status === "NOT_ASSESSED") {
+    return unavailable("INVALID_SWING_PATTERN_DATA", swingAssessment.reasons.join(" "));
   }
   // Request UTC timestamps from the provider; never assume local-exchange time.
   const latestTime = Date.parse(`${bars.at(-1).datetime.replace(" ", "T")}Z`);
@@ -74,36 +75,62 @@ export function screenInstrument(instrument, marketData, { horizon = "week", mar
     return unavailable("INVALID_INDICATORS", "Pris- eller volymdata gav ogiltiga indikatorer.");
   }
   base.metrics = { price, ema20, ema50, atr, atr_pct: atrPct, rvol, momentum_pct: momentumPct, average_bar_turnover: turnover, latest_datetime: bars.at(-1).datetime };
-  if (horizon === "week") Object.assign(base.metrics, { prior_20_day_high: priorHigh, volume_vs_prior_median: volumeVsMedian });
+  if (horizon === "week") Object.assign(base.metrics, {
+    prior_20_day_high: priorHigh, volume_vs_prior_median: volumeVsMedian,
+    prior_3_day_high: swingAssessment.metrics.prior_3_day_high,
+    prior_3_day_range: swingAssessment.metrics.prior_3_day_range,
+    prior_two_bar_fall_atr: swingAssessment.metrics.prior_two_bar_fall_atr,
+  });
   base.status = "NO_TRADE";
   if (minimumTurnover === null || turnover < minimumTurnover) reasons.push("För låg omsättning eller ej stödd valuta.");
   if (atrPct < 0.2 || atrPct > 8) reasons.push("Volatilitet utanför skannerns försöksintervall.");
-  if (!(price > ema20 && ema20 > ema50)) reasons.push("Ingen tydlig positiv EMA-trend.");
-  if (momentumPct <= 0) reasons.push("Momentum är inte positivt.");
-  const swingSetups = [];
   if (horizon === "week") {
-    // Match the experiment's completed-candle swing setups: a pullback does not
-    // require elevated volume, while a breakout uses the prior median volume.
-    const positiveTrend = price > ema20 && ema20 > ema50 && momentumPct > 0;
-    const pullback = positiveTrend && bars.at(-1).low <= ema20 + 0.2 * atr && bars.at(-1).low >= ema20 - 0.8 * atr && price > ema20;
-    const breakout = positiveTrend && price > priorHigh && volumeVsMedian >= 1.2;
-    if (pullback) swingSetups.push("PULLBACK");
-    if (breakout) swingSetups.push("BREAKOUT");
-    if (positiveTrend && !swingSetups.length) reasons.push("Varken rekyl mot EMA20 eller 20-dagars utbrott med volym bekräftades.");
-  } else if (rvol < 1) {
-    reasons.push("Senaste candle har inte förhöjd volym.");
+    if (swingAssessment.status === "NO_SETUP") reasons.push(...swingAssessment.reasons);
+  } else {
+    if (!(price > ema20 && ema20 > ema50)) reasons.push("Ingen tydlig positiv EMA-trend.");
+    if (momentumPct <= 0) reasons.push("Momentum är inte positivt.");
+    if (rvol < 1) reasons.push("Senaste candle har inte förhöjd volym.");
   }
   if (reasons.length) return base;
-  base.status = "WAIT";
-  base.screening_setups = swingSetups;
+  base.screening_setups = swingAssessment?.setups || [];
+  base.screening_plans = swingAssessment?.plans || [];
+  if (horizon === "week") {
+    const completedData = {
+      ...marketData, ticker: instrument.symbol, requested_ticker: instrument.symbol,
+      exchange: instrument.exchange, requested_exchange: instrument.exchange,
+      currency: instrument.currency, bars, latest: bars.at(-1), price,
+      verified_instrument: instrument.type === "Common Stock" ? {
+        symbol: instrument.symbol, name: instrument.name || instrument.symbol,
+        exchange: instrument.exchange, currency: instrument.currency,
+        country: instrument.country, type: instrument.type,
+      } : null,
+      validation: validateMarketBars(bars),
+    };
+    const strategy = { version: SWING_STRATEGY_VERSION, ...swingAssessment };
+    const decision = evaluateReadiness({ ticker: instrument.symbol, market, horizonCode: "week", marketStatus, marketData: completedData, strategy, now });
+    base.decision = decision;
+    if (decision.status !== "TRADE") {
+      base.status = decision.status === "NO_TRADE" ? "NO_TRADE" : "NOT_ASSESSED";
+      base.data_issue = decision.reason_codes[0] || "SIGNAL_VERIFICATION_FAILED";
+      base.reasons = decision.reasons;
+      if (base.status === "NOT_ASSESSED") base.metrics = null;
+      return base;
+    }
+    base.status = "TRADE";
+    base.primary_setup = swingAssessment.setups[0];
+    base.signal_plan = { ...swingAssessment.plans[0] };
+  } else {
+    base.status = "WAIT";
+  }
   // Filter/ranking strength is NOT a probability. All rules are experimental.
   base.rank_score = (rvol >= 1.5 ? 2 : 1) + (momentumPct >= 1 ? 2 : 1);
   base.reasons = horizon === "week"
-    ? ["Positiv trend och momentum samt experimentellt swingupplägg: " + base.screening_setups.join(" + ") + ".", "Endast analyskandidat. Risk Engine och strategivalidering saknas."]
+    ? ["Experimentellt swingupplägg på färdigställda dagskurser: " + base.screening_setups.join(" + ") + ".", "Teknisk TRADE-signal utan genomförd order. Uppläggets lönsamhet är inte validerad."]
     : ["Positiv trend, momentum och volym klarar försöksfiltren.", "Endast analyskandidat. Risk Engine och strategivalidering saknas."];
   return base;
 }
 
 export function rankCandidates(items) {
-  return [...items].sort((a, b) => (b.status === "WAIT") - (a.status === "WAIT") || b.rank_score - a.rank_score || `${a.symbol}:${a.exchange}`.localeCompare(`${b.symbol}:${b.exchange}`));
+  const priority = (item) => item.status === "TRADE" ? 2 : item.status === "WAIT" ? 1 : 0;
+  return [...items].sort((a, b) => priority(b) - priority(a) || b.rank_score - a.rank_score || `${a.symbol}:${a.exchange}`.localeCompare(`${b.symbol}:${b.exchange}`));
 }

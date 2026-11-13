@@ -20,7 +20,7 @@ function fixture() {
   });
   const marketData = { ticker: "TEST", requested_ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: new Date(signalTime - 60000).toISOString(), bars };
   const strategy = assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(signalTime)), now: signalTime });
-  return { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" }, strategy, marketData, record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
+  return { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" }, strategy, marketData, record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
 }
 
 const day = (datetime, open, high, low, close) => ({ datetime, open, high, low, close, volume: 1_000_000 });

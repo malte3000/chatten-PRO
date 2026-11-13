@@ -4,7 +4,7 @@ import { ema, screenInstrument, rankCandidates } from "../src/screening.js";
 import { assessSwingSetup } from "../src/strategyModel.js";
 
 const now = Date.parse("2026-09-16T16:00:00Z");
-const instrument = { symbol: "NVDA", exchange: "NASDAQ", currency: "USD" };
+const instrument = { symbol: "NVDA", exchange: "NASDAQ", currency: "USD", country: "United States", type: "Common Stock" };
 const bars = Array.from({ length: 100 }, (_, index) => {
   const close = 50 + index;
   return { datetime: new Date(now - (100 - index) * 86400000).toISOString().slice(0, 10), open: close - 0.5, high: close + 1, low: close - 1, close, volume: index === 99 ? 2e6 : 1e6 };
@@ -18,9 +18,12 @@ test("EMA uses an SMA seed and is reproducible", () => {
   assert.equal(ema([1, 2, 3, 4], 3), 3);
   assert.equal(ema([1, 2], 3), null);
 });
-test("completed 20-day breakout passes experimental swing screen but cannot become TRADE", () => {
+test("completed 20-day breakout emits one experimental, unfilled swing TRADE signal", () => {
   const result = screenInstrument(instrument, data, swingOptions);
-  assert.equal(result.status, "WAIT");
+  assert.equal(result.status, "TRADE");
+  assert.equal(result.decision.status, "TRADE");
+  assert.equal(result.primary_setup, "BREAKOUT");
+  assert.equal(result.signal_plan.setup, "BREAKOUT");
   assert.ok(result.metrics.atr > 2);
   assert.equal(result.metrics.rvol, 2);
   assert.ok(result.metrics.ema20 > result.metrics.ema50);
@@ -57,20 +60,20 @@ test("swing screen discards an unfinished daily candle and uses it only after cl
   const current = { datetime: "2026-09-16", open: 150, high: 151, low: 149, close: 150, volume: 100 };
   const withCurrent = { ...data, bars: [...bars, current] };
   const open = screenInstrument(instrument, withCurrent, swingOptions);
-  assert.equal(open.status, "WAIT");
+  assert.equal(open.status, "TRADE");
   assert.equal(open.metrics.latest_datetime, "2026-09-15");
   assert.equal(open.metrics.rvol, 2);
   assert.equal(open.screening_selection.excluded_current_session, true);
   assert.equal(withCurrent.bars.length, 101);
   const unfinishedWithoutVolume = screenInstrument(instrument, { ...data, bars: [...bars, { ...current, volume: 0, high: 149 }] }, swingOptions);
-  assert.equal(unfinishedWithoutVolume.status, "WAIT");
+  assert.equal(unfinishedWithoutVolume.status, "TRADE");
   assert.equal(unfinishedWithoutVolume.metrics.latest_datetime, "2026-09-15");
 
   const closed = screenInstrument(instrument, withCurrent, { market: "usa", now: Date.parse("2026-09-16T21:00:00Z") });
   assert.equal(closed.status, "NO_TRADE");
   assert.equal(closed.metrics.latest_datetime, "2026-09-16");
   assert.equal(closed.screening_selection.excluded_current_session, false);
-  assert.ok(closed.reasons.includes("Varken rekyl mot EMA20 eller 20-dagars utbrott med volym bekräftades."));
+  assert.ok(closed.reasons.some((reason) => reason.includes("Ingen pullback-, breakout-, range breakout- eller reboundregel")));
 });
 test("swing screen fails closed without matching exchange timezone or market clock", () => {
   for (const variant of [
@@ -100,15 +103,46 @@ test("an ordinary rising swing trend without a pullback or volume-backed breakou
   assert.equal(result.data_issue, null);
   assert.ok(result.metrics);
   assert.deepEqual(result.screening_setups, []);
-  assert.deepEqual(result.reasons, ["Varken rekyl mot EMA20 eller 20-dagars utbrott med volym bekräftades."]);
+  assert.deepEqual(result.reasons, ["Ingen pullback-, breakout-, range breakout- eller reboundregel uppfylldes."]);
   assert.equal(assessSwingSetup({ ...data, bars: ordinaryVolume }, { ticker: "NVDA", marketStatus, now }).status, "NO_SETUP");
+});
+
+test("scanner and individual analysis agree on a short range breakout", () => {
+  const rangeBars = bars.map((bar) => ({ ...bar, volume: 1e6 }));
+  for (const [offset, close] of [144.5, 144.6, 144.7].entries()) {
+    rangeBars[96 + offset] = { ...rangeBars[96 + offset], open: close - 0.3, high: close + 0.5, low: close - 0.5, close };
+  }
+  rangeBars[99] = { ...rangeBars[99], open: 144.9, high: 145.8, low: 144.8, close: 145.3 };
+  const candidateData = { ...data, bars: rangeBars };
+  const scanned = screenInstrument(instrument, candidateData, swingOptions);
+  const analyzed = assessSwingSetup(candidateData, { ticker: "NVDA", marketStatus, now });
+  assert.equal(scanned.status, "TRADE");
+  assert.deepEqual(scanned.screening_setups, ["RANGE_BREAKOUT"]);
+  assert.deepEqual(scanned.screening_setups, analyzed.setups);
+  assert.deepEqual(scanned.screening_plans, analyzed.plans);
+});
+
+test("scanner can discover a rebound despite negative short-term momentum", () => {
+  const reboundBars = bars.map((bar) => ({ ...bar, volume: 1e6 }));
+  for (const [offset, close] of [138, 136, 133].entries()) {
+    reboundBars[96 + offset] = { ...reboundBars[96 + offset], open: close - 0.3, high: close + 0.5, low: close - 0.5, close };
+  }
+  reboundBars[99] = { ...reboundBars[99], open: 132, high: 134.5, low: 131.5, close: 134 };
+  const candidateData = { ...data, bars: reboundBars };
+  const scanned = screenInstrument(instrument, candidateData, swingOptions);
+  const analyzed = assessSwingSetup(candidateData, { ticker: "NVDA", marketStatus, now });
+  assert.equal(scanned.status, "TRADE");
+  assert.ok(scanned.metrics.momentum_pct < 0);
+  assert.deepEqual(scanned.screening_setups, ["REBOUND"]);
+  assert.deepEqual(scanned.screening_setups, analyzed.setups);
+  assert.deepEqual(scanned.screening_plans, analyzed.plans);
 });
 
 test("a valid EMA20 pullback with below-average volume remains a swing analysis candidate", () => {
   const pullbackBars = bars.map((bar, index) => index === bars.length - 1 ? { ...bar, low: 139.8, volume: 8e5 } : bar);
   const pullbackData = { ...data, bars: pullbackBars };
   const result = screenInstrument(instrument, pullbackData, swingOptions);
-  assert.equal(result.status, "WAIT");
+  assert.equal(result.status, "TRADE");
   assert.ok(result.metrics.rvol < 1);
   assert.deepEqual(result.screening_setups, ["PULLBACK"]);
   assert.deepEqual(assessSwingSetup(pullbackData, { ticker: "NVDA", marketStatus, now }).setups, ["PULLBACK"]);
@@ -118,7 +152,7 @@ test("a 20-day breakout uses prior median volume just like the swing strategy", 
   const breakoutBars = bars.map((bar, index) => ({ ...bar, volume: [85, 90].includes(index) ? 1e7 : index === 99 ? 1.3e6 : 1e6 }));
   const breakoutData = { ...data, bars: breakoutBars };
   const result = screenInstrument(instrument, breakoutData, swingOptions);
-  assert.equal(result.status, "WAIT");
+  assert.equal(result.status, "TRADE");
   assert.ok(result.metrics.rvol < 1);
   assert.ok(result.metrics.volume_vs_prior_median >= 1.2);
   assert.deepEqual(result.screening_setups, ["BREAKOUT"]);
@@ -141,7 +175,7 @@ test("falling prices and low liquidity cannot pass", () => {
   assert.equal(screenInstrument(instrument, { ...data, bars: lowVolume }, swingOptions).status, "NO_TRADE");
 });
 test("ranking is stable and leaves original results untouched", () => {
-  const items = [{ symbol: "Z", exchange: "NYSE", status: "NO_TRADE", rank_score: 4 }, { symbol: "B", exchange: "NYSE", status: "WAIT", rank_score: 3 }, { symbol: "A", exchange: "NYSE", status: "WAIT", rank_score: 3 }];
+  const items = [{ symbol: "Z", exchange: "NYSE", status: "NO_TRADE", rank_score: 4 }, { symbol: "B", exchange: "NYSE", status: "WAIT", rank_score: 3 }, { symbol: "A", exchange: "NYSE", status: "TRADE", rank_score: 3 }];
   assert.deepEqual(rankCandidates(items).map((item) => item.symbol), ["A", "B", "Z"]);
   assert.equal(items[0].symbol, "Z");
 });

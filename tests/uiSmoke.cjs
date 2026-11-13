@@ -9,7 +9,7 @@ function createMockApi() {
   let marketStatusFails = false;
   let paperPhase = null;
   function dailyBars() {
-    const lastDate = paperPhase === null ? new Date() : new Date("2026-09-29T12:00:00Z");
+    const lastDate = new Date("2026-09-29T12:00:00Z");
     lastDate.setUTCHours(0, 0, 0, 0);
     lastDate.setUTCDate(lastDate.getUTCDate() - 1);
     const dates = [];
@@ -38,23 +38,28 @@ function createMockApi() {
         { symbol: "TESTB", name: "Testbolag B", exchange: "OMX", currency: "SEK", status: "NOT_ASSESSED", rank_score: 0, metrics: null, reasons: ["Kursdata för rätt aktie och börs kunde inte verifieras."] },
       ], next_offset: 2, total: 2, universe_size: 200, done: true, wait_ms: 0,
     } };
-    if (pathname === "/api/scan") return { status: 200, body: {
+    if (pathname === "/api/scan") {
+      const isDay = input.horizon === "day";
+      const candidateStatus = isDay ? "WAIT" : "TRADE";
+      return { status: 200, body: {
       results: [
-        { symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 4, metrics: { rvol: 2, atr: 2 }, reasons: ["Experimental trend filters passed"] },
-        { symbol: "MOCKA", name: "Mock A", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 3, metrics: { rvol: 1.5 }, reasons: ["Technical filters passed"] },
-        { symbol: "MOCKB", name: "Mock B", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 2, metrics: { rvol: 1.4 }, reasons: ["Technical filters passed"] },
-        { symbol: "MOCKC", name: "Mock C", exchange: "NASDAQ", currency: "USD", status: "WAIT", rank_score: 1, metrics: { rvol: 1.3 }, reasons: ["Technical filters passed"] },
+        { symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 4, metrics: { rvol: 2, atr: 2 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, screening_setups: isDay ? [] : ["PULLBACK"], primary_setup: isDay ? null : "PULLBACK", signal_plan: isDay ? null : { setup: "PULLBACK", entry_reference: 149, stop: 139, target: 169 }, reasons: ["Experimental trend filters passed"] },
+        { symbol: "MOCKA", name: "Mock A", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 3, metrics: { rvol: 1.5 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
+        { symbol: "MOCKB", name: "Mock B", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 2, metrics: { rvol: 1.4 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
+        { symbol: "MOCKC", name: "Mock C", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 1, metrics: { rvol: 1.3 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
         { symbol: "BAD", name: "Rejected", exchange: "NYSE", status: "NO_TRADE", rank_score: 0, reasons: ["Missing reliable volume"] },
       ], next_offset: 5, total: 5, universe_size: 1000, done: true, wait_ms: 0,
     } };
+    }
     if (pathname === "/api/market-data") {
       const ticker = searchParams.get("ticker");
       if (ticker === "FAILDATA") return { status: 502, body: { error: "Simulerat marknadsdatafel" } };
       const bars = dailyBars();
       return { status: 200, body: {
         ticker, requested_ticker: ticker, exchange: searchParams.get("exchange") || "NASDAQ", currency: "USD",
+        verified_instrument: { symbol: ticker, name: ticker, exchange: searchParams.get("exchange") || "NASDAQ", currency: "USD", country: "United States", type: "Common Stock" },
         interval: searchParams.get("interval") || "1day", timezone: "America/New_York",
-        fetched_at: paperPhase === null ? new Date().toISOString() : paperPhase === "signal" ? "2026-09-28T21:00:00.000Z" : "2026-09-29T21:00:00.000Z",
+        fetched_at: paperPhase === null || paperPhase === "signal" ? "2026-09-28T21:00:00.000Z" : "2026-09-29T21:00:00.000Z",
         validation: { valid: true }, bars, latest: bars.at(-1), price: bars.at(-1).close,
       } };
     }
@@ -66,6 +71,8 @@ function createMockApi() {
     } };
     if (pathname === "/api/market-status") return { status: 200, body: {
       market: searchParams.get("market"), isOpen: false, label: "Mockad stängd börs",
+      reason: "after_close", sessionDate: "2026-09-28",
+      timeZone: "America/New_York", earlyClose: false,
     } };
     if (pathname === "/api/analyze-news") {
       newsRequests.push(input.ticker);
@@ -120,6 +127,7 @@ async function runSmoke() {
   catch { browser = await chromium.launch({ headless: true, channel: "msedge", timeout: 10000 }); }
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page.clock.install({ time: new Date("2026-09-28T21:00:00Z") });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const mock = createMockApi();
@@ -152,11 +160,11 @@ async function runSmoke() {
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
     assert.equal(saved[0].signal_inputs.record_type, "SCAN");
     assert.equal(saved[0].signal_inputs.checked, 5);
-    assert.equal(saved[0].strategy_version, "v0.6-experimental");
+    assert.equal(saved[0].strategy_version, "v0.7-experimental");
     assert.equal(saved[0].signal_inputs.scan_decision_policy, "TECHNICAL_ONLY");
-    assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "WAIT").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
-    assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical watch candidates");
-    await scanner.getByText("4 tekniska kandidater (AVVAKTA)", { exact: false }).waitFor();
+    assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "TRADE").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
+    assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical signals");
+    await scanner.getByText("4 aktuella experimentella TRADE-signaler", { exact: false }).waitFor();
     const [scanDownload] = await Promise.all([
       page.waitForEvent("download"),
       scanner.getByRole("button", { name: "Exportera skanningsrapport (JSON)" }).click(),
@@ -170,7 +178,7 @@ async function runSmoke() {
     assert.equal(scanReport.complete, true);
     assert.equal(scanReport.checked, 5);
     assert.equal(scanReport.results.length, 5);
-    assert.deepEqual(scanReport.results.map((item) => item.status).sort(), ["NO_TRADE", "WAIT", "WAIT", "WAIT", "WAIT"]);
+    assert.deepEqual(scanReport.results.map((item) => item.status).sort(), ["NO_TRADE", "TRADE", "TRADE", "TRADE", "TRADE"]);
     assert.ok(scanReport.results.every((item) => Array.isArray(item.reasons) && item.reasons.length));
     assert.ok(scanReport.scan_started_at && scanReport.scan_finished_at && scanReport.seed);
     assert.equal(/api.?key|password|auth.?token/i.test(scanJson), false);
@@ -179,7 +187,7 @@ async function runSmoke() {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.screenshot({ path: "tests/preview-scanner-mobile.png", fullPage: true });
     await scanner.getByRole("button", { name: "Öppna samlad analys" }).first().click();
-    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
+    await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
     assert.equal(saved[0].ticker, "NVDA");
     assert.equal(saved[0].signal_inputs.record_type, "ANALYSIS");
     const savedBeforeManual = saved.length;
@@ -188,12 +196,12 @@ async function runSmoke() {
     assert.equal(await page.getByRole("button", { name: "Starta analys" }).isDisabled(), true);
     await ticker.fill("NVDA");
     await page.getByRole("button", { name: "Starta analys" }).click();
-    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
+    await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
     assert.equal(saved.length, savedBeforeManual + 1);
-    assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
+    assert.equal(saved[0].signal_inputs.decision.status, "TRADE");
     assert.equal(saved[0].winner, null);
     const result = page.getByRole("region", { name: "Samlad analys" });
-    await result.getByText("BEVAKA", { exact: true }).waitFor();
+    await result.getByText("UPPLÄGG HITTAT", { exact: true }).waitFor();
     await result.locator('[aria-label="Datakontroll för swing"]').getByText(/Senaste levererade dagskurs:/).waitFor();
     assert.equal(saved[0].signal_inputs.strategy.status, "WATCH");
     assert.equal(saved[0].signal_inputs.news_requested, false);
@@ -208,7 +216,7 @@ async function runSmoke() {
     assert.deepEqual(newsRequests, ["NVDA"]);
     assert.equal(saved.length, savedBeforeOptionalNews);
     assert.equal(saved[0].signal_inputs.news_requested, false);
-    assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
+    assert.equal(saved[0].signal_inputs.decision.status, "TRADE");
     await newsDetails.click();
     assert.equal(await result.getByText("Fullständig motivering som visas under Se mer.", { exact: true }).isVisible(), true);
     await newsDetails.click();
@@ -222,13 +230,13 @@ async function runSmoke() {
     await replay.getByText(/1 stängda simuleringar/).waitFor();
     assert.equal(saved.length, savedBeforeReplay);
     await replay.locator("summary").first().click();
-    const risk = result.locator("details").filter({ hasText: "Se mer – pullback · provisorisk riskplan" });
+    const risk = result.locator("details").filter({ hasText: "Se mer – rekyl mot EMA20 · provisorisk riskplan" });
     await risk.locator("summary").click();
     await risk.getByLabel("Kontokapital (USD)").fill("10000");
     await risk.getByLabel("Max risk per trade (%)").fill("1");
     await risk.getByText(/Kalkyl: högst \d+ hela aktier/).waitFor();
-    assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
-    assert.equal(saved[0].trade_status, "NO_TRADE");
+    assert.equal(saved[0].signal_inputs.decision.status, "TRADE");
+    assert.equal(saved[0].trade_status, "SIGNAL_ONLY");
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: "tests/preview-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -263,8 +271,8 @@ async function runSmoke() {
     for (const failedTicker of ["FAIL", "FAILDATA"]) {
       await ticker.fill(failedTicker);
       await page.getByRole("button", { name: "Starta analys" }).click();
-      await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
-      assert.equal(saved[0].signal_inputs.decision.status, failedTicker === "FAIL" ? "WAIT" : "NO_TRADE");
+      await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
+      assert.equal(saved[0].signal_inputs.decision.status, failedTicker === "FAIL" ? "TRADE" : "NOT_ASSESSED");
       assert.equal(saved[0].signal_inputs.strategy.status, failedTicker === "FAIL" ? "WATCH" : "NOT_ASSESSED");
       if (failedTicker === "FAILDATA") {
         assert.deepEqual(saved[0].signal_inputs.strategy.plans, []);
@@ -273,11 +281,11 @@ async function runSmoke() {
         await failedAnalysis.locator('[aria-label="Experimentell swingbedömning"]').getByText("EJ BEDÖMT", { exact: true }).waitFor();
       } else {
         assert.ok(saved[0].signal_inputs.strategy.plans.length > 0);
-        await page.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+        await page.getByRole("region", { name: "Samlad analys" }).getByText("UPPLÄGG HITTAT", { exact: true }).waitFor();
         const failedAnalysis = page.getByRole("region", { name: "Samlad analys" });
         await failedAnalysis.getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
         await failedAnalysis.getByText(/Valfria nyheter kunde inte hämtas: Simulerat nyhetsfel/).waitFor();
-        assert.equal(saved[0].signal_inputs.decision.status, "WAIT");
+        assert.equal(saved[0].signal_inputs.decision.status, "TRADE");
       }
     }
     await journal.getByText("Utfall i hämtad journal", { exact: true }).click();
@@ -287,21 +295,21 @@ async function runSmoke() {
     await page.getByRole("navigation", { name: "Analysläge" }).getByRole("button", { name: "Skanna marknaden" }).click();
     const dayScanner = page.getByRole("region", { name: "Marknadsskanner" });
     await dayScanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
-    await dayScanner.getByText("4 tekniska förfilterträffar (ej AVVAKTA-beslut)", { exact: false }).waitFor();
+    await dayScanner.getByText("4 tekniska förfilterträffar (inte TRADE-signaler)", { exact: false }).waitFor();
     await dayScanner.getByText("Daytradeskannern är ett tekniskt förfilter.", { exact: false }).waitFor();
     await dayScanner.getByRole("button", { name: "Öppna samlad analys" }).first().click();
-    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
-    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
+    assert.equal(saved[0].signal_inputs.decision.status, "NOT_ASSESSED");
     await page.getByLabel("Tidshorisont").selectOption("week");
     mock.setMarketStatusFailure(true);
     await page.getByRole("button", { name: "Starta analys" }).click();
-    await page.getByText("Analysförslaget är sparat i journalen.", { exact: false }).waitFor();
+    await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
     assert.equal(saved[0].signal_inputs.strategy.status, "NOT_ASSESSED");
-    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    assert.equal(saved[0].signal_inputs.decision.status, "NOT_ASSESSED");
     await page.getByRole("region", { name: "Samlad analys" }).locator('[aria-label="Datakontroll för swing"]').getByText("Börsklockan kunde inte verifieras. Se felorsaken ovan.").waitFor();
     await page.getByRole("region", { name: "Samlad analys" }).getByRole("button", { name: "Hämta valfri nyhetsbakgrund" }).click();
     await page.getByRole("region", { name: "Samlad analys" }).getByText("Kort nyhetssammanfattning.", { exact: true }).waitFor();
-    assert.equal(saved[0].signal_inputs.decision.status, "NO_TRADE");
+    assert.equal(saved[0].signal_inputs.decision.status, "NOT_ASSESSED");
 
     const paperPage = await browser.newPage({ viewport: { width: 1280, height: 900 }, timezoneId: "Europe/Stockholm" });
     paperPage.on("pageerror", (error) => errors.push(error.message));
@@ -316,26 +324,26 @@ async function runSmoke() {
     await paperPage.getByRole("navigation", { name: "Analysläge" }).getByRole("button", { name: "Analysera en aktie" }).click();
     await paperPage.getByRole("textbox", { name: "Aktie / ticker" }).fill("NVDA");
     await paperPage.getByRole("button", { name: "Starta analys" }).click();
-    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
+    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("UPPLÄGG HITTAT", { exact: true }).waitFor();
     const paperJournal = paperPage.getByRole("region", { name: "Paperlogg" });
-    await paperJournal.getByText("Spara teknisk BEVAKA-kandidat lokalt", { exact: true }).click();
+    await paperJournal.getByText("Spara teknisk TRADE-signal för uppföljning", { exact: true }).click();
     await paperJournal.getByLabel("Max observerade sessioner").selectOption("1");
     await paperJournal.getByLabel("Fast simulerat aktieantal").fill("2");
     await paperJournal.getByLabel("Avgift per order (USD)").fill("1");
     await paperJournal.getByLabel("Slippage i baspunkter").fill("10");
     await paperJournal.getByRole("button", { name: "Spara paperobservation" }).click();
-    await paperJournal.getByText("Det tekniska upplägget är låst och sparat lokalt.", { exact: false }).waitFor();
+    await paperJournal.getByText("TRADE-signalens tekniska upplägg är låst och sparat lokalt.", { exact: false }).waitFor();
     const readPaper = () => paperPage.evaluate(() => JSON.parse(localStorage.getItem("sannolikhet-paper-observations-v1")).records);
     const [captured] = await readPaper();
     assert.equal(captured.status, "PENDING_ENTRY");
     assert.equal(captured.signalDate, "2026-09-28");
-    assert.equal(captured.sourceDecisionStatus, "WAIT");
+    assert.equal(captured.sourceDecisionStatus, "TRADE");
     assert.equal(captured.holdingSessions, 1);
     assert.equal(captured.feePerOrder, 1);
     assert.equal(captured.slippageBps, 10);
     await paperPage.getByRole("button", { name: "Starta analys" }).click();
-    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("BEVAKA", { exact: true }).waitFor();
-    await paperJournal.getByText("Spara teknisk BEVAKA-kandidat lokalt", { exact: true }).click();
+    await paperPage.getByRole("region", { name: "Samlad analys" }).getByText("UPPLÄGG HITTAT", { exact: true }).waitFor();
+    await paperJournal.getByText("Spara teknisk TRADE-signal för uppföljning", { exact: true }).click();
     await paperJournal.getByLabel("Max observerade sessioner").selectOption("1");
     await paperJournal.getByLabel("Fast simulerat aktieantal").fill("2");
     await paperJournal.getByLabel("Avgift per order (USD)").fill("1");
@@ -392,7 +400,7 @@ async function runSmoke() {
     assert.equal((await readPaper())[0].status, "CLOSED");
     assert.equal((await readTradingView())[0].status, "CLOSED");
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: scanner export, swing watch, duplicate guard, TradingView manual paper fill and close, theoretical paper follow-up with stale-data retry, optional news, day prefilter, real trade mock, missing market clock and mobile layout.");
+    console.log("Browser smoke passed: scanner export, swing TRADE, duplicate guard, TradingView manual paper fill and close, theoretical paper follow-up with stale-data retry, optional news, day prefilter, real trade mock, missing market clock and mobile layout.");
   } finally { await browser.close(); }
 }
 

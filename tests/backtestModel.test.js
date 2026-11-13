@@ -47,6 +47,17 @@ test("a next-open gap below stop or beyond original target rejects the entry", (
   }
 });
 
+test("historical signals respect the same prior-turnover gate as live analysis", () => {
+  const data = makeData();
+  data.bars = data.bars.map((bar) => ({ ...bar, volume: bar.volume / 1000 }));
+  const report = run(data);
+  assert.equal(report.status, "COMPLETED");
+  assert.equal(report.closedTrades.length, 0);
+  assert.equal(report.decisions[0].viability.status, "NO_TRADE");
+  assert.ok(report.decisions[0].viability.reason_codes.includes("LIQUIDITY_BELOW_MINIMUM"));
+  assert.match(report.rejectedSignals[0].reason, /Livefilter/);
+});
+
 test("a later stop gap fills at the worse opening price and applies slippage", () => {
   const data = makeData();
   data.bars[61] = { ...data.bars[61], open: 100, close: 101, low: 99, high: 102 };

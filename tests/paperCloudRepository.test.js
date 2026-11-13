@@ -22,7 +22,7 @@ function fixture() {
     return { datetime, open: close - 0.3, high: close + 0.5, low: close - 0.5, close, volume: index === 99 ? 1_500_000 : 1_000_000 };
   });
   const marketData = { ticker: "TEST", requested_ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: new Date(now - 60000).toISOString(), bars };
-  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" }, marketData, strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(now)), now }), record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
+  const analysis = { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" }, marketData, strategy: assessSwingSetup(marketData, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(now)), now }), record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
   const record = createPaperObservation(analysis, { setup: "BREAKOUT", holdingSessions: 3, quantity: 2, feePerOrder: 1, slippageBps: 10, recordedAt: now });
   const later = { ...marketData, bars: [...bars,
     { datetime: "2026-09-29", open: 149.7, high: 150.5, low: 149.5, close: 150, volume: 1_000_000 },

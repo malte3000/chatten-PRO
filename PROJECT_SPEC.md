@@ -2,15 +2,19 @@
 
 ## Projekt: Sannolikhetsterminal / Signal Bot
 
-### Aktuell inriktning (grundbeslut 2026-09-16, kompletterad 2026-09-30)
+### Aktuell inriktning (grundbeslut 2026-09-16, kodstatus 2026-11-13)
 
 - Swingtrading (1–5 handelsdagar) är huvudläge; daytrading är sekundärt.
-- Färdig terminal ska ha TRADE eller NO TRADE som slutbeslut. AVVAKTA/BEVAKA
-  är ett temporärt testläge för paperobservationer medan TRADE är spärrat.
+- Samlad swinganalys kan ge en experimentell teknisk TRADE-signal eller NO TRADE.
+  EJ BEDÖMT används när data eller strategisnapshot inte kan verifieras.
+  TRADE är en ofylld signal; användaren bestämmer själv om någon order läggs.
 - Samlad kort analys med Start och Se mer, inte separata analysverktyg.
 - AI-confidence får inte användas som uppgångs-/vinstsannolikhet.
-- TRADE kräver validerad signalmotor och godkänd separat Risk Engine.
-- 65–75 procent träffsäkerhet är ett testmål, inte ett påstående om resultat.
+- Den experimentella TRADE-signalen kräver färdigställda verifierade dagskurser,
+  ett definierat upplägg, tillräcklig omsättning, rimligt ATR-intervall och en
+  provisorisk stopp- och målplan. Validerad edge och separat Risk Engine återstår.
+- Träffprocent, genomsnittligt nettoresultat i R efter kostnader, antal signaler
+  och förluster ska följas tillsammans. Ingen träffsäkerhet är uppmätt eller utlovad.
 - Förslag och faktiska trades ska hållas isär i personlig journal.
 - Ingen automatisk orderläggning eller självlärande strategiändring.
 - Framtida marknadsval: utred Europa i stället för enbart Sverige/Stockholm.
@@ -18,27 +22,39 @@
   öppettider, helgdagar och verifierad datatäckning. Behåll Stockholm som
   faktiskt stödd marknad tills dessa delar fungerar och är testade.
 
-Första etappen implementerar kompakt analys och befintlig gemensam journal.
-Personlig identitet och validerad quant/risk återstår. Manuell registrering av
-verkliga aktieaffärer och stängning med resultat efter avgifter finns nu i den
-gemensamma journalen; det är användarens affär, inte ett botgodkänt beslut.
-Swinganalys visar experimentella pullback-/breakout-bevakningsregler på stängda
-dagsljus. Provisorisk ATR-stop, 2R-målnivå och aktieantal från användarens eget
-kapital/riskprocent visas som kalkyl. Ett lokalt historiskt prisprov och ett
-referensfilter med relativ styrka finns som experiment. Referensfiltret används
-bara i prov med explicit referensdata, ännu inte i den vanliga analysen.
-Historisk validering saknas; kalkylen kan inte godkänna TRADE. Från readiness-v0.3
-ger swingreglernas NO_SETUP/NOT_ASSESSED NO TRADE och endast WATCH kan ge AVVAKTA.
-En separat lokal paperlogg kan låsa en BEVAKA-kandidat och pröva den mot senare
-färdigställda dagskurser. Loggen är webbläsarbunden, inte en verklig trade eller
-godkänd order och inte synkad via databasen. Journalstatistik
+Kompakt analys och en gemensam journal finns. Personlig identitet i huvudjournalen
+och validerad quant/risk återstår. Användaren kan registrera och avsluta en faktisk
+affär separat; en analysrad eller signal räknas aldrig som genomförd affär eller vinst.
+`swing-v0.5-experimental` prövar fyra självständiga uppgångsupplägg på stängda
+dagskurser: EMA20-pullback, 20-dagarsutbrott, kort konsolideringsutbrott och
+återhämtning i en större stigande trend. `readiness-v0.6` kan ge TRADE om ett
+upplägg och kontrollerna klaras, NO TRADE för bedömd data utan godkänt läge och
+EJ BEDÖMT för dataproblem. Provisorisk stopp, 2R-mål och positionskalkyl visas,
+men de är inte en validerad Risk Engine. Referensfilter med relativ styrka finns
+bara i ett separat historiskt prisprov, inte i vanlig analys.
+
+`v0.7-experimental` skannar ett budgetbegränsat, dagligt varierat aktieurval.
+Swing använder samma fyra upplägg; en skannerträff öppnas i samlad analys för
+slutbedömning. Daytrade är fortfarande ett tekniskt förfilter utan egen
+TRADE-strategi. Databrister märks EJ BEDÖMT. Nyheter hämtas bara separat på
+begäran och styr inte signaler. SCAN-rapporter hålls isär från faktiska trades.
+Global API-kvot, bredare urval, produktspecifik data och validering återstår.
+
+Varje verifierad TRADE från skanner eller enskild analys sparas även i en
+separat, lokal signallogg med signaldatum, strategiversion och låsta planer.
+Dubbletter från samma aktie och session slås ihop; motstridiga nivåer skrivs
+inte över. Loggen kan exporteras som JSON men synkas inte mellan webbläsare.
+Endast matchande paperuppföljningar länkas som simulerade utfall.
+Signaler utan framtida utfall räknas varken som vinster eller förluster.
+
+`paper-forward-v0.4` kan följa en låst experimentell TRADE-signal med senare
+kursdata; historiska v0.1–v0.3-observationer kan fortsatt läsas. Redan sparade
+v0.4-observationer med `swing-v0.4-experimental` kan också fortsatt läsas och
+följas upp när nya signaler använder `swing-v0.5-experimental`. Paperloggen
+lagras lokalt och kan synkas manuellt via ett separat personligt testkonto om
+funktionen är aktiverad. Den är ett mätunderlag, inte orderläggning. Journalstatistik
 räknar giltiga avslutade faktiska affärer separat från förslag och simuleringar,
 per strategiversion och valuta. Omfattningen är de senaste 100 hämtade posterna.
-Screeningens första experimentella version är nu implementerad för ett
-budgetbegränsat, dagligt varierat aktieurval. EMA20/50, ATR, momentum och RVOL
-gallrar kandidater utan TRADE-godkännande. Nyheter hämtas för högst tre
-kandidater och SCAN-rapporter hålls isär från faktiska trades. Global kvot,
-fullständigare urval, produktdata och validerad strategi återstår.
 
 API-hanteringen rapporterar saknade Anthropic-nycklar, providerfel och timeout
 tydligare. `vercel.json` sätter funktionsgränser. Live-provider- och Supabase-

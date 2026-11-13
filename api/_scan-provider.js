@@ -1,6 +1,7 @@
 import { validateMarketBars } from "./_market-data-validation.js";
 import { screenInstrument, rankCandidates } from "../src/screening.js";
 import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
+import { isSupportedCommonStock } from "./_instrument.js";
 
 const universeCache = new Map();
 const MAX_RUN = 100;
@@ -25,30 +26,21 @@ function hash(value) {
   return result >>> 0;
 }
 
-function isClearlyUnsupportedProduct(item) {
-  const symbol = String(item.symbol || "").toUpperCase();
-  const name = String(item.name || "").toUpperCase();
-  return /^(?:BULL|BEAR|MINI|TURBO)(?:[.\s-]|$)/.test(symbol) ||
-    /\.AVA\./.test(symbol) ||
-    /\.(?:WT|WTS|WS)(?:\.[A-Z])?$/.test(symbol) ||
-    /\b(?:WARRANTS?|CERTIFICATES?|MINI FUTURE|TURBO|BULL CERTIFICATE|BEAR CERTIFICATE)\b/.test(name);
-}
-
 export async function getUniverse(market, now = Date.now()) {
   const cached = universeCache.get(market);
   if (cached && now - cached.time < 3 * 3600000) return cached.items;
   const country = market === "usa" ? "United States" : "Sweden";
+  const currency = market === "usa" ? "USD" : "SEK";
   const params = new URLSearchParams({ country, type: "Common Stock", format: "JSON" });
   const data = await provider(`https://api.twelvedata.com/stocks?${params}`);
   if (!Array.isArray(data.data)) throw new ScanError("Aktielistan har ett ogiltigt format.");
   const seen = new Set();
   const items = data.data.filter((item) => {
     const exchange = String(item.exchange || "");
-    const supportedExchange = market === "usa" ? ["NASDAQ", "NYSE"].includes(exchange.toUpperCase()) : item.mic_code === "XSTO" || /stockholm|^OMX$/i.test(exchange);
     const key = `${item.symbol}:${exchange}`;
-    if (!supportedExchange || item.type !== "Common Stock" || item.country !== country || !/^[A-Z0-9._ -]{1,20}$/i.test(item.symbol || "") || isClearlyUnsupportedProduct(item) || seen.has(key)) return false;
+    if (!isSupportedCommonStock(item, market) || seen.has(key)) return false;
     seen.add(key); return true;
-  }).map((item) => ({ symbol: item.symbol.toUpperCase(), name: String(item.name || item.symbol), exchange: String(item.exchange), mic_code: item.mic_code || null, currency: item.currency, country }));
+  }).map((item) => ({ symbol: item.symbol.toUpperCase(), name: String(item.name || item.symbol), exchange: String(item.exchange), mic_code: item.mic_code || null, currency, country, type: "Common Stock" }));
   if (!items.length) throw new ScanError("Inga stödda aktier hittades på vald marknad. Sverigetäckning måste verifieras hos datakällan.");
   universeCache.set(market, { time: now, items });
   return items;

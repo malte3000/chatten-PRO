@@ -12,33 +12,38 @@ explicit tickerbekräftelse. **Se mer** öppnar
 hela analysoutputen och datasnapshoten. Byte av ticker, marknad eller horisont
 ogiltigförklarar resultat och avbryter gamla förfrågningar.
 Marknad kan väljas som USA, Sverige/Stockholm eller Av (endast analys).
-Av påverkar öppettidskontrollen, inte datakällans börs eller TRADE-spärren.
+Av kringgår inte kraven på verifierad börsklocka och kursdata.
 
-Besluten är TRADE, AVVAKTA och NO TRADE. **TRADE är spärrat i denna etapp**:
-validerad signalmotor, godkänd Risk Engine och utvärderad edge saknas.
-Giltiga inputs med en experimentell swingkandidat kan ge AVVAKTA;
-saknade/ogiltiga inputs och frånvaro av swingupplägg ger NO TRADE.
+Samlad swinganalys ger **TRADE · EXPERIMENTELL** när ett tekniskt upplägg och
+grundkraven på data, omsättning, volatilitet och provisoriska risknivåer klaras.
+Giltig data utan upplägg eller med för låg omsättning/olämplig volatilitet ger
+NO TRADE. Saknad eller motsägelsefull data ger EJ BEDÖMT, inte en teknisk slutsats.
+TRADE är en signal om ett möjligt framtida ingångsläge, aldrig en lagd order
+eller en uppmätt vinstsannolikhet. Användaren avgör själv om någon affär görs.
 AI-confidence används aldrig som uppgångssannolikhet. Ingen träffsäkerhet är
 uppmätt eller utlovad. Den gamla simulatorn finns i `src/LegacySimulator.jsx`
 som arkiverad kod och är inte monterad i appen.
 
-Från `readiness-v0.5` avgör validerad kursdata och den experimentella swingregeln
-det övergripande beslutet. Nyheter påverkar inte AVVAKTA/NO TRADE. Regeln
-`WATCH` kan högst ge AVVAKTA;
-`NO_SETUP` och `NOT_ASSESSED` ger NO TRADE med skilda orsakskoder.
-Daytrade utan en egen bedömd strategi ger NO TRADE.
+I `readiness-v0.6` verifieras den aktuella strategisnapshoten mot färdigställda
+dagskurser innan ett `WATCH`-upplägg kan bli TRADE. `NO_SETUP` ger NO TRADE;
+fel i data, börsklocka eller strategisnapshot ger EJ BEDÖMT. Nyheter påverkar
+inte beslutet. Daytradeläget saknar ännu en bedömd egen strategi och kan inte
+ge TRADE.
 Beslutets version och orsakskoder sparas i analyssnapshoten så att poster
 från olika urvalsregler inte blandas.
 
-Manuell aktieanalys i swingläge visar nu även en experimentell pullback-/breakout-
-bevakning på färdigställda dagsljus. Den är märkt WATCH/NO_SETUP och använder
-ännu inget referensfilter i den vanliga analysen. Reglerna är inte historiskt
-validerade. En WATCH kan
-visa provisorisk ATR-stop, 2R-målnivå och en kalkyl av högsta hela aktieantalet
-från användarens eget kapital och riskprocent. Detta är inte en validerad
-Risk Engine och kan inte godkänna TRADE.
+`swing-v0.5-experimental` känner igen fyra separata uppgångsupplägg:
+pullback mot EMA20, 20-dagarsutbrott med volym, utbrott ur en kort
+konsolidering och återhämtning efter nedgång i en större stigande trend.
+Ett upplägg räcker; de behöver inte inträffa samtidigt. Mönsterbedömningen
+är `WATCH` eller `NO_SETUP` internt. Den samlade analysen kan ge TRADE först
+efter sina ytterligare kontroller. Referensfiltret används ännu inte i vanlig
+analys. Reglernas lönsamhet är inte validerad. En signal kan visa provisorisk
+stop, 2R-målnivå och en kalkyl av högsta hela aktieantalet utifrån användarens
+eget kapital och riskprocent. Kalkylen är inte en validerad Risk Engine och
+stoppen skyddar inte mot gap eller slippage.
 
-`swing-v0.3-experimental` kontrollerar börsens tidszon och verkliga sessionsdatum.
+Swingbedömningen kontrollerar börsens tidszon och verkliga sessionsdatum.
 Dagens ofärdiga dagsljus tas bort; gårdagens behålls även om börsen är öppen.
 Alla använda dagsljus kräver positiv volym. Dagens ofärdiga ljus utesluts före
 OHLC-/volymvalidering i både skanner och manuell analys. Live-swingbedömningen
@@ -68,7 +73,8 @@ svarar med HTML i stället för JSON.
 
 Standardläget **Skanna marknaden** kräver inte en ticker. Välj USA/Sverige,
 swing/daytrade och budget 20, 40 eller 100 aktier. Instrument hämtas automatiskt
-från Twelve Datas `/stocks` (Common Stock, NASDAQ/NYSE eller OMX/XSTO).
+från Twelve Datas `/stocks` (Common Stock, NASDAQ/NYSE eller OMX/XSTO) och
+begränsas till USD för USA respektive SEK för Stockholm innan kursdata hämtas.
 Urvalet är deterministiskt för UTC-datum och varierar dagligen; ett nytt klick
 samma dag ger normalt samma första 20, och en större budget utökar urvalet.
 Det är INTE hela börsen eller de bevisat bästa aktierna. Antal kontrollerade,
@@ -77,28 +83,28 @@ skanning.
 
 Skannern hämtar 100 candles per aktie och kräver minst 60 giltiga candles,
 volymdata, rätt symbol/börs/valuta och tillräckligt färska tidsstämplar.
-Gemensamma försöksfilter är pris > EMA20 > EMA50, positivt fem-candle-momentum,
-ATR 0,2–8 procent och genomsnittlig candle-omsättning >= 1 M USD / 10 M SEK.
-Swing (`v0.6-experimental`) kräver dessutom ett faktiskt pullback-upplägg mot
-EMA20 eller ett utbrott över föregående 20 dagars högsta med minst 1,2 gånger
-medianvolymen. Pullback kräver inte förhöjd dagsvolym. Bara färdigställda
-dagskurser enligt börsens klocka används. Daytrade kräver RVOL >= 1 och
-omsättningen gäller per 15-minuterscandle. RVOL jämför senaste candle med
+Gemensamma försöksgränser är ATR 0,2–8 procent och genomsnittlig omsättning
+minst 1 M USD / 10 M SEK. Swing (`v0.7-experimental`) använder samma fyra
+upplägg som manuell analys: pullback, 20-dagarsutbrott, kort
+konsolideringsutbrott eller återhämtning i en större stigande trend. Varje
+upplägg bedöms var för sig på färdigställda dagskurser. Daytradens tekniska
+förfilter kräver fortfarande pris > EMA20 > EMA50, positivt fem-candle-momentum
+och RVOL >= 1; omsättningen gäller per 15-minuterscandle. RVOL jämför senaste candle med
 föregående 20 candles, inte samma klockslag andra dagar.
 I daytradeläge kan senaste 15-minuterscandle vara ofullständig. Dessa
 startregler är inte backtestade och kan missa bra lägen. Filterpoäng 0–4 är
 aldrig vinstsannolikhet.
 
-Skannern bedömer tekniska kandidater utan Anthropic-anrop. En swingträff kan
-högst ge AVVAKTA och öppnas i den samlade analysen. Dayträffar är bara
-tekniska förfilterträffar; samlad analys ger NO TRADE tills en separat
-daytrade-strategi finns. Saknad eller negativ nyhetsanalys ändrar inte
-försöksutfallet. Nya skanningar märks med `TECHNICAL_ONLY` och en ny
-screen-version så att de inte blandas med äldre nyhetsstyrda skanningar.
+Skannern bedömer tekniska kandidater utan Anthropic-anrop. En swingträff är
+en analyskandidat; när den öppnas i samlad analys kan den ge en experimentell
+TRADE-signal efter samma verifiering som en manuellt angiven aktie. Skanningen
+i sig är ingen order. Dayträffar är bara tekniska förfilterträffar och kan
+inte ge TRADE innan en separat daytradestrategi finns. Saknad eller negativ
+nyhetsanalys ändrar inte försöksutfallet. Nya skanningar märks med
+`TECHNICAL_ONLY` och screen-version så att regelversioner hålls isär.
 En positiv nyhetsriktning utan faktiskt sökresultat eller citat nedgraderas
 till oklar. Visade sökkällor är länkar för kontroll, inte en verifiering av
 publiceringsdatum eller påståendenas relevans för den valda horisonten.
-Alla tekniska swingkandidater stannar på AVVAKTA tills Risk Engine och tester finns.
 Uppenbara hävstångsprodukter filtreras bort även när aktielistan felaktigt märker
 dem som Common Stock. Produktklassningen är ännu inte fullständigt verifierad;
 warranter/certifikat kräver separat produktdata och riskanalys.
@@ -107,8 +113,8 @@ Om datakällan inte ger verifierbar kursdata för en symbol får den EJ BEDÖMT,
 inte NO TRADE. Om en hel Stockholmsbatch saknar verifierbar kursdata avbryts
 skanningen utan tradebedömning, så den inte fortsätter dra API-krediter eller
 visar ett falskt 20/20 NO TRADE-resultat.
-Från `v0.3-experimental` gäller EJ BEDÖMT även när en prisserie inte går att
-bedöma på grund av för få candles, ogiltig klocka, för gamla data eller
+EJ BEDÖMT gäller även när en prisserie inte går att bedöma på grund av för få
+candles, ogiltig klocka, för gamla data eller
 otillförlitlig volym. Giltiga data som inte klarar de tekniska försöksfiltren
 ger fortfarande NO TRADE.
 
@@ -148,10 +154,12 @@ Varje analysförslag skickas till `/api/trades`. Sparstatus och fel visas.
 Journalen hämtar senaste poster från samma endpoint. Ett förslag är inte en
 genomförd trade och räknas inte som en vinst/förlust.
 
-Befintligt databasformat behålls: analysförslag har `signal=NO_TRADE`,
-`direction=NONE`, `trade_status=NO_TRADE`. Exakt UI-beslut (inklusive WAIT)
-ligger i `signal_inputs.decision`. `confidence=0` är en kompatibilitetsmarkör,
-inte en sannolikhet. Statistik måste skilja `record_type=ANALYSIS` från trades.
+Befintligt databasformat behålls: en experimentell TRADE-analys sparas som
+`signal=BUY`, `direction=LONG`, `trade_status=SIGNAL_ONLY`, utan ingångspris
+eller utfall. NO TRADE och EJ BEDÖMT sparas med `signal=NO_TRADE`,
+`direction=NONE`, `trade_status=NO_TRADE`; exakt UI-beslut ligger i
+`signal_inputs.decision`. `confidence=0` är en kompatibilitetsmarkör, inte
+en sannolikhet. Statistik måste skilja `record_type=ANALYSIS` från trades.
 
 En användare kan manuellt registrera en redan tagen aktieaffär från en analys
 med riktning, faktiskt ingångspris, antal, valfri stop/målnivå och ingångsavgift.
@@ -170,13 +178,13 @@ kontots avkastning, och vinstandelen är inte en prognos.
 
 ## Historiskt prisprov (experimentellt)
 
-Swinganalysens **Se mer – historiskt prisprov** kör pullback eller breakout
-lokalt på redan hämtade dagskurser. Ange fast antal aktier, avgift per order
+Swinganalysens **Se mer – historiskt prisprov** kör ett av de fyra aktuella
+swinguppläggen lokalt på redan hämtade dagskurser. Ange fast antal aktier, avgift per order
 och slippage uttryckligen. Provet gör inga API-anrop eller journalskrivningar.
 Upp till 100 dagsljus, varav de första 60 används för indikatorer, är ett kort
 urval och kan ge få eller inga simuleringar. Historiska nyheter och AI ingår inte.
 
-`daily-replay-v0.1-experimental` fattar beslut med endast då tillgängliga
+`daily-replay-v0.3-experimental` fattar beslut med endast då tillgängliga
 stängningsdata. Ingång sker tidigast vid nästa observerade öppning, försämrad
 av slippage. Ursprunglig stop behålls; mål och R räknas om från simulerad ingång.
 Öppning utanför signalens nivåer avvisas. Stop-gap fylls vid sämre öppningspris.
@@ -210,16 +218,32 @@ släpper igenom signalen i detta prov. Ingen extra referensdata hämtas automati
 Detta är ett prisexperiment för LONG-regler. Saknade sessioner, justering för
 splittar/utdelningar, överlevnadsbias, spread, likviditet och verkliga fills
 måste utredas i ett bredare prov. Backtestmotorn gör ingen sådan kontroll och
-bekräftar inte en edge. Out-of-sample, paper trading och validerad Risk Engine
-krävs fortfarande före TRADE.
+bekräftar inte en edge. Kontrollerad out-of-sample-uppföljning, tillräckligt
+många framtida utfall och riskarbete återstår innan någon slutsats om
+lönsamhet eller användning med riktiga pengar kan dras.
+
+## Automatisk lokal TRADE-signallogg
+
+Varje verifierad experimentell TRADE-signal från en skanningsbatch eller en
+enskild analys sparas automatiskt i webbläsarens separata signallogg. Den låser
+marknad, ticker, börs, signaldatum, strategiversion, upptäckta upplägg och deras
+referenspris, stopp och mål. Samma signal från både skanner och manuell analys
+räknas en gång; motstridiga låsta nivåer skrivs inte över. Panelen kan exportera
+alla poster som JSON. Om lokal lagring misslyckas visas ett fel medan signalen
+fortfarande kan granskas på skärmen.
+
+Signalloggen innehåller inga order och synkas inte mellan webbläsare eller
+datorer. En avslutad paperobservation kan länkas till sin signal som ett
+**simulerat** utfall. Övriga signaler har inget uppmätt utfall; antalet loggade
+signaler eller enstaka simuleringar är inte en verifierad träffsäkerhet.
 
 ## Paperlogg för framtida utfall (experimentell)
 
 För det första sammanhängande paperprovet används **USA + swing**. Kör en
 skanning när den senaste stängda dagskursen har levererats och exportera hela
 skanningsrapporten, även om allt blev NO TRADE eller EJ BEDÖMT. Öppna samlad
-analys för varje teknisk AVVAKTA-kandidat som ska ingå i provet och spara den
-låsta paperobservationen innan nästa handelssession öppnar. Använd samma
+analys för varje teknisk kandidat som ska ingå i provet och spara en låst
+paperobservation för varje TRADE-signal innan nästa handelssession öppnar. Använd samma
 innehavstid, antal, avgift och slippage för varje nytt prov. När nästa
 handelssession har stängt kan **Kontrollera öppna paperposter** hämta senare
 kurser; exportera sedan paperloggen som JSON. En signal för samma aktie,
@@ -245,11 +269,14 @@ mot TradingView. Exportera därför både paperobservationer och TradingView-ord
 som varsin JSON-kopia; båda kan importeras igen utan att redan låsta utfall skrivs över. Ändra inte försöksreglerna utifrån några få tidiga
 utfall; då blir resultatet svårt att tolka.
 
-En teknisk BEVAKA-kandidat som fått AVVAKTA kan sparas som en lokal
-paperobservation. Nyheter är valfri bakgrund och påverkar inte beslutet.
-Nya paperposter märks **endast teknik** och hålls åtskilda från äldre
-paperposter som skapades under den nyhetsstyrda beslutsregeln. Detta
-öppnar inte för en riktig TRADE-signal.
+En experimentell teknisk TRADE-signal kan sparas som en lokal paperobservation.
+Nyheter är valfri bakgrund och påverkar inte beslutet. Nya poster använder
+`paper-forward-v0.4` och hålls åtskilda från äldre v0.1–v0.3-poster, som
+fortfarande kan läsas och följas upp. Redan sparade v0.4-observationer från
+`swing-v0.4-experimental` fortsätter också att vara läsbara och möjliga att
+följa upp efter övergången till `swing-v0.5-experimental`. En paperobservation
+är ett mätresultat, inte en genomförd affär. Äldre manuella paperorder kopplade till v0.3-poster
+kan fortfarande läsas och avslutas.
 Signalens datum, strategi, prisnivåer och uttryckliga antaganden om antal,
 avgifter, slippage och max innehavstid låses innan senare dagskurser finns.
 Nya färdigställda dagskurser kontrolleras med knappen **Kontrollera öppna paperposter**. Knappen visar hur många
@@ -268,8 +295,8 @@ Supabase-testprojektet och hämta dem på en annan dator. Synken sker inte
 automatiskt. Olika previewdomäner har varsin lokal lagring; JSON-export ger en
 extra kopia som kan importeras manuellt. Olika poster med samma ID skrivs inte
 över vid import. Lokala och importerade observationer samt deras simulerade
-utfall är inte oberoende verifierade och kan inte användas som underlag för att
-låsa upp TRADE.
+utfall är inte oberoende verifierade och kan inte ensamma fastställa
+strategins lönsamhet.
 
 En personlig molnsynk finns i koden och är **avstängd som standard** i nya
 miljöer. Ett separat Supabase Free-testprojekt, `chatten-pro-paper-sync-test`
@@ -302,7 +329,7 @@ synken utan att skriva över dem. Äldre lokala observationer märks som
 `local_import`. Import av ett redan avslutat utfall sker i två steg och kan
 behöva upprepas om nätet bryts mellan stegen. Även nya webbläsarobservationer
 är klientdata, inte serververifierade handelsutfall. Ingen synkad post får
-användas som verifierad träffsäkerhet eller för att låsa upp TRADE.
+användas som verifierad träffsäkerhet eller bevis för användning med riktiga pengar.
 Paperstatistiken håller olika antaganden om max innehavstid, aktieantal,
 avgift och slippage åtskilda. Håll antagandena fasta under ett paperprov och
 exportera en JSON-kopia efter varje ny observation och uppföljning.
@@ -352,7 +379,7 @@ förbrukar API-krediter; ingen livekörning ingår i de automatiska testerna.
 
 1. Användaridentitet och personlig journal.
 2. Separat Risk Engine med konfigurerbara riskgränser.
-3. Historiskt prov på kontrollerade marknadsdata, out-of-sample och paper trading före TRADE-aktivering.
+3. Historiskt prov på kontrollerade marknadsdata och framåtriktad uppföljning av experimentella TRADE-signaler före påståenden om träffsäkerhet.
 4. Koppla och utvärdera referensfiltret i vanlig analys samt utökad screening och
    distribuerade kvotjobb. Derivat kräver separat produktspecifik data och
    riskanalys.

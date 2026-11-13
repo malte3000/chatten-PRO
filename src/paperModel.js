@@ -3,13 +3,14 @@ import { validateCandle } from "../api/_market-data-validation.js";
 import { selectClosedDailyBars } from "./dailyBars.js";
 import { assessSwingSetup, SWING_STRATEGY_VERSION } from "./strategyModel.js";
 
-export const PAPER_VERSION = "paper-forward-v0.3";
-const PREVIOUS_PAPER_VERSION = "paper-forward-v0.2";
+export const PAPER_VERSION = "paper-forward-v0.4";
+const PREVIOUS_PAPER_VERSION = "paper-forward-v0.3";
+const OLDER_PAPER_VERSION = "paper-forward-v0.2";
 const LEGACY_PAPER_VERSION = "paper-forward-v0.1";
 export const PAPER_BASIS = Object.freeze({ WITH_NEWS: "WITH_NEWS", TECHNICAL_ONLY: "TECHNICAL_ONLY" });
 // Keep versions that could already have produced a paper observation here when
 // the live strategy changes. Creation below still requires the current model.
-export const PAPER_HISTORICAL_SWING_VERSIONS = Object.freeze(["swing-v0.2-experimental"]);
+export const PAPER_HISTORICAL_SWING_VERSIONS = Object.freeze(["swing-v0.2-experimental", "swing-v0.3-experimental", "swing-v0.4-experimental"]);
 export const supportsPaperStrategyVersion = (version, currentVersion = SWING_STRATEGY_VERSION) =>
   version === currentVersion || PAPER_HISTORICAL_SWING_VERSIONS.includes(version);
 const DAY_MS = 86400000;
@@ -19,7 +20,8 @@ const MARKETS = {
   stockholm: { currency: "SEK", timezone: "Europe/Stockholm", exchanges: new Set(["OMX", "XSTO", "STOCKHOLM", "NASDAQSTOCKHOLM", "OMXSTOCKHOLM"]) },
 };
 const STATUSES = new Set(["PENDING_ENTRY", "PENDING_OPEN", "REJECTED_ENTRY", "CLOSED", "NOT_ASSESSED"]);
-const SETUPS = new Set(["PULLBACK", "BREAKOUT"]);
+const SETUPS = new Set(["PULLBACK", "BREAKOUT", "RANGE_BREAKOUT", "REBOUND"]);
+const HISTORICAL_SETUPS = new Set(["PULLBACK", "BREAKOUT"]);
 const text = (value) => typeof value === "string" ? value.trim() : "";
 const upper = (value) => text(value).toUpperCase();
 const exchangeKey = (value) => upper(value).replace(/[\s_-]/g, "");
@@ -61,14 +63,15 @@ function nextSession(market, date) {
 }
 
 function baseValid(record) {
-  if (!record || typeof record !== "object" || Array.isArray(record) || ![PAPER_VERSION, PREVIOUS_PAPER_VERSION, LEGACY_PAPER_VERSION].includes(record.version) || !STATUSES.has(record.status)) return false;
-  if (record.version === PAPER_VERSION && !(record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "WAIT")) return false;
-  if (record.version === PREVIOUS_PAPER_VERSION && !(
+  if (!record || typeof record !== "object" || Array.isArray(record) || ![PAPER_VERSION, PREVIOUS_PAPER_VERSION, OLDER_PAPER_VERSION, LEGACY_PAPER_VERSION].includes(record.version) || !STATUSES.has(record.status)) return false;
+  if (record.version === PAPER_VERSION && !(record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "TRADE" && supportsPaperStrategyVersion(record.strategyVersion))) return false;
+  if (record.version === PREVIOUS_PAPER_VERSION && !(record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "WAIT")) return false;
+  if (record.version === OLDER_PAPER_VERSION && !(
     (record.basis === PAPER_BASIS.WITH_NEWS && record.sourceDecisionStatus === "WAIT") ||
     (record.basis === PAPER_BASIS.TECHNICAL_ONLY && record.sourceDecisionStatus === "NO_TRADE")
   )) return false;
   if (record.version === LEGACY_PAPER_VERSION && (record.basis !== undefined || record.sourceDecisionStatus !== undefined)) return false;
-  if (!text(record.sourceAnalysisTradeId) || record.id !== `paper:${record.sourceAnalysisTradeId}:${record.setup}` || !SETUPS.has(record.setup)) return false;
+  if (!text(record.sourceAnalysisTradeId) || record.id !== `paper:${record.sourceAnalysisTradeId}:${record.setup}` || !SETUPS.has(record.setup) || (record.version !== PAPER_VERSION && !HISTORICAL_SETUPS.has(record.setup))) return false;
   const config = MARKETS[record.market];
   if (!config || !text(record.ticker) || upper(record.ticker) !== record.ticker || !text(record.exchange) || !config.exchanges.has(exchangeKey(record.exchange)) || record.currency !== config.currency || record.timezone !== config.timezone || !supportsPaperStrategyVersion(record.strategyVersion)) return false;
   if (!validDate(record.signalDate) || !isoTime(record.recordedAt) || !isoTime(record.sourceFetchedAt) || Date.parse(record.sourceFetchedAt) > Date.parse(record.recordedAt) + 120000 || Date.parse(record.recordedAt) - Date.parse(record.sourceFetchedAt) > MAX_CAPTURE_DELAY_MS) return false;
@@ -101,10 +104,10 @@ export function validatePaperObservation(record) {
   return record.winner === (Math.abs(record.netPnl) <= 1e-8 ? null : record.netPnl > 0);
 }
 
-/** All new WAIT observations use technical rules only; news never clears a signal. */
+/** All new TRADE observations use technical rules only; news never clears a signal. */
 export function paperObservationBasis(analysis) {
   if (analysis?.strategy?.status !== "WATCH") return null;
-  return analysis?.decision?.status === "WAIT" ? PAPER_BASIS.TECHNICAL_ONLY : null;
+  return analysis?.decision?.status === "TRADE" ? PAPER_BASIS.TECHNICAL_ONLY : null;
 }
 
 export function createPaperObservation(analysis, { setup, holdingSessions, quantity, feePerOrder, slippageBps, recordedAt = Date.now() } = {}) {
@@ -113,7 +116,7 @@ export function createPaperObservation(analysis, { setup, holdingSessions, quant
   const market = analysis?.market;
   const config = MARKETS[market];
   const basis = paperObservationBasis(analysis);
-  if (!config || !SETUPS.has(setup) || !/swingtrading/i.test(String(analysis?.horizon || "")) || !basis || analysis?.strategy?.version !== SWING_STRATEGY_VERSION) throw new Error("Endast ett aktuellt experimentellt swingupplägg med AVVAKTA kan följas på papper.");
+  if (!config || !SETUPS.has(setup) || !/swingtrading/i.test(String(analysis?.horizon || "")) || !basis || analysis?.strategy?.version !== SWING_STRATEGY_VERSION) throw new Error("Endast en aktuell experimentell swing-TRADE kan följas på papper.");
   const data = analysis.marketData;
   const ticker = upper(analysis.ticker);
   if (!ticker || upper(data?.ticker) !== ticker || (data.requested_ticker && upper(data.requested_ticker) !== ticker) || data.currency !== config.currency || !config.exchanges.has(exchangeKey(data.exchange)) || (data.requested_exchange && exchangeKey(data.requested_exchange) !== exchangeKey(data.exchange)) || data.timezone !== config.timezone || (data.market && data.market !== market)) throw new Error("Aktie, börs, valuta eller tidszon matchar inte den valda marknaden.");

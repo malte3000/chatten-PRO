@@ -24,7 +24,7 @@ function fixture() {
   const data = { ticker: "TEST", requested_ticker: "TEST", exchange: "NASDAQ", currency: "USD", timezone: "America/New_York", interval: "1day", fetched_at: new Date(monday - 60000).toISOString(), bars: makeBars() };
   const strategy = assessSwingSetup(data, { ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(monday)), now: monday });
   assert.equal(strategy.status, "WATCH");
-  return { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "WAIT" }, strategy, marketData: data, record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
+  return { ticker: "TEST", market: "usa", horizon: "1–5 handelsdagar (swingtrading)", decision: { status: "TRADE" }, strategy, marketData: data, record: { trade_id: "TEST-analysis-1", signal_inputs: { record_type: "ANALYSIS" } } };
 }
 
 function day(datetime, open, high, low, close) { return { datetime, open, high, low, close, volume: 1_000_000 }; }
@@ -34,7 +34,7 @@ const wednesday = "2026-09-30";
 const thursday = "2026-10-01";
 const closeTime = (date) => `${date}T21:00:00Z`;
 
-test("captures a current WATCH once, freezes its signal inputs, and is JSON-valid", () => {
+test("captures a current technical TRADE once, freezes its signal inputs, and is JSON-valid", () => {
   const analysis = fixture();
   const before = structuredClone(analysis);
   const paper = createPaperObservation(analysis, options);
@@ -44,7 +44,7 @@ test("captures a current WATCH once, freezes its signal inputs, and is JSON-vali
   assert.equal(paper.signalBar.close, 149);
   assert.equal(paper.version, PAPER_VERSION);
   assert.equal(paper.basis, PAPER_BASIS.TECHNICAL_ONLY);
-  assert.equal(paper.sourceDecisionStatus, "WAIT");
+  assert.equal(paper.sourceDecisionStatus, "TRADE");
   assert.ok(validatePaperObservation(paper));
   assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(paper))));
   assert.deepEqual(analysis, before);
@@ -53,7 +53,7 @@ test("captures a current WATCH once, freezes its signal inputs, and is JSON-vali
   assert.equal(paper.signalBar.close, 149);
 });
 
-test("new WAIT captures use technical-only basis regardless of optional news", () => {
+test("new TRADE captures use technical-only basis regardless of optional news", () => {
   const analysis = fixture();
   assert.equal(paperObservationBasis(analysis), PAPER_BASIS.TECHNICAL_ONLY);
   const withoutNews = createPaperObservation(analysis, options);
@@ -63,17 +63,68 @@ test("new WAIT captures use technical-only basis regardless of optional news", (
   assert.deepEqual(withNews, withoutNews);
   assert.equal(validatePaperObservation({ ...withoutNews, basis: PAPER_BASIS.WITH_NEWS }), false);
   assert.equal(validatePaperObservation({ ...withoutNews, sourceDecisionStatus: "NO_TRADE" }), false);
+  assert.equal(validatePaperObservation({ ...withoutNews, sourceDecisionStatus: "WAIT" }), false);
+  analysis.decision.status = "WAIT";
+  assert.equal(paperObservationBasis(analysis), null);
 });
 
-test("historical v0.1 and v0.2 records remain valid and outcome groups separate rule versions", () => {
+test("new setup identifiers are valid only for current-version observations", () => {
+  const current = createPaperObservation(fixture(), options);
+  for (const setup of ["RANGE_BREAKOUT", "REBOUND"]) {
+    const record = { ...current, setup, id: `paper:${current.sourceAnalysisTradeId}:${setup}`, plan: { ...current.plan, setup } };
+    assert.equal(validatePaperObservation(record), true);
+    assert.equal(validatePaperObservation({ ...record, version: "paper-forward-v0.3", sourceDecisionStatus: "WAIT", strategyVersion: "swing-v0.3-experimental" }), false);
+  }
+});
+
+test("range-breakout and rebound TRADE signals can be captured from their actual closed bars", () => {
+  const scenarios = [
+    ["RANGE_BREAKOUT", (bars) => {
+      for (const [offset, close] of [144.5, 144.6, 144.7].entries()) {
+        bars[96 + offset] = { ...bars[96 + offset], open: close - 0.3, high: close + 0.5, low: close - 0.5, close };
+      }
+      bars[99] = { ...bars[99], open: 144.9, high: 145.8, low: 144.8, close: 145.3 };
+    }],
+    ["REBOUND", (bars) => {
+      for (const [offset, close] of [138, 136, 133].entries()) {
+        bars[96 + offset] = { ...bars[96 + offset], open: close - 0.3, high: close + 0.5, low: close - 0.5, close };
+      }
+      bars[99] = { ...bars[99], open: 132, high: 134.5, low: 131.5, close: 134 };
+    }],
+  ];
+  for (const [setup, changeBars] of scenarios) {
+    const analysis = fixture();
+    changeBars(analysis.marketData.bars);
+    analysis.strategy = assessSwingSetup(analysis.marketData, {
+      ticker: "TEST", marketStatus: getMarketStatus("usa", new Date(monday)), now: monday,
+    });
+    assert.deepEqual(analysis.strategy.setups, [setup]);
+    const captured = createPaperObservation(analysis, { ...options, setup });
+    assert.equal(captured.setup, setup);
+    assert.equal(captured.sourceDecisionStatus, "TRADE");
+    assert.equal(captured.version, PAPER_VERSION);
+    assert.equal(validatePaperObservation(captured), true);
+  }
+});
+
+test("historical v0.1 through v0.3 records remain valid and outcome groups separate rule versions", () => {
   const analysis = fixture();
   const current = createPaperObservation(analysis, options);
+  const oldWait = {
+    ...current, version: "paper-forward-v0.3", strategyVersion: "swing-v0.3-experimental", sourceDecisionStatus: "WAIT",
+    sourceAnalysisTradeId: "TEST-old-wait", id: "paper:TEST-old-wait:BREAKOUT",
+  };
+  const previousTrade = {
+    ...current, strategyVersion: "swing-v0.4-experimental",
+    sourceAnalysisTradeId: "TEST-old-trade", id: "paper:TEST-old-trade:BREAKOUT",
+  };
+  assert.equal(validatePaperObservation(previousTrade), true);
   const oldTechnical = {
     ...current, version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", sourceDecisionStatus: "NO_TRADE",
     sourceAnalysisTradeId: "TEST-old-technical", id: "paper:TEST-old-technical:BREAKOUT",
   };
   const oldWithNews = {
-    ...current, version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", basis: PAPER_BASIS.WITH_NEWS,
+    ...current, version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", basis: PAPER_BASIS.WITH_NEWS, sourceDecisionStatus: "WAIT",
     sourceAnalysisTradeId: "TEST-old-news", id: "paper:TEST-old-news:BREAKOUT",
   };
   const legacy = {
@@ -82,19 +133,22 @@ test("historical v0.1 and v0.2 records remain valid and outcome groups separate 
   };
   delete legacy.basis;
   delete legacy.sourceDecisionStatus;
-  for (const record of [current, oldTechnical, oldWithNews, legacy]) {
+  for (const record of [current, oldWait, oldTechnical, oldWithNews, legacy]) {
     assert.ok(validatePaperObservation(record));
     assert.ok(validatePaperObservation(JSON.parse(JSON.stringify(record))));
   }
   assert.equal(validatePaperObservation({ ...oldTechnical, sourceDecisionStatus: "WAIT" }), false);
   assert.equal(validatePaperObservation({ ...oldWithNews, sourceDecisionStatus: "NO_TRADE" }), false);
+  assert.equal(validatePaperObservation({ ...oldWait, sourceDecisionStatus: "TRADE" }), false);
+  assert.equal(validatePaperObservation({ ...oldWait, setup: "REBOUND", id: "paper:TEST-old-wait:REBOUND", plan: { ...oldWait.plan, setup: "REBOUND" } }), false);
   const followup = later(analysis, day(tuesday, 149.7, 150.5, 149.5, 150), day(wednesday, 150.7, 151.5, 150.5, 151), day(thursday, 151.7, 152.5, 151.5, 152));
-  const summary = summarizePaperObservations([current, oldTechnical, oldWithNews, legacy].map((record) => settlePaperObservation(record, followup, { now: closeTime(thursday) })));
-  assert.equal(summary.closedCount, 4);
+  const summary = summarizePaperObservations([current, oldWait, oldTechnical, oldWithNews, legacy].map((record) => settlePaperObservation(record, followup, { now: closeTime(thursday) })));
+  assert.equal(summary.closedCount, 5);
   assert.deepEqual(summary.groups.map((group) => [group.paperVersion, group.basis]).sort(), [
     ["paper-forward-v0.1", PAPER_BASIS.WITH_NEWS],
     ["paper-forward-v0.2", PAPER_BASIS.TECHNICAL_ONLY],
     ["paper-forward-v0.2", PAPER_BASIS.WITH_NEWS],
+    ["paper-forward-v0.3", PAPER_BASIS.TECHNICAL_ONLY],
     [PAPER_VERSION, PAPER_BASIS.TECHNICAL_ONLY],
   ].sort());
 });
@@ -110,8 +164,10 @@ test("a captured v0.2 paper record remains a readable historical version after a
   const record = { ...createPaperObservation(fixture(), options), version: "paper-forward-v0.2", strategyVersion: "swing-v0.2-experimental", sourceDecisionStatus: "NO_TRADE" };
   assert.equal(record.strategyVersion, "swing-v0.2-experimental");
   assert.ok(validatePaperObservation(record));
-  assert.equal(supportsPaperStrategyVersion(record.strategyVersion, "swing-v0.3-experimental"), true);
-  assert.equal(supportsPaperStrategyVersion("unknown-version", "swing-v0.3-experimental"), false);
+  assert.equal(supportsPaperStrategyVersion(record.strategyVersion, "swing-v0.4-experimental"), true);
+  assert.equal(supportsPaperStrategyVersion("swing-v0.3-experimental", "swing-v0.4-experimental"), true);
+  assert.equal(supportsPaperStrategyVersion("swing-v0.4-experimental"), true);
+  assert.equal(supportsPaperStrategyVersion("unknown-version", "swing-v0.4-experimental"), false);
   assert.equal(validatePaperObservation({ ...record, strategyVersion: "unknown-version" }), false);
 });
 

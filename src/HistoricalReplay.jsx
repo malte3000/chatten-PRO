@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { runSwingReplay } from "./backtestModel.js";
+import { SWING_SETUP_IDS } from "./strategyModel.js";
 
 const CONTROL = "border border-cyan-800 bg-slate-950 text-slate-100 rounded px-3 py-2 text-sm";
 const number = (value) => Number.isFinite(value) ? value.toLocaleString("sv-SE", { maximumFractionDigits: 2 }) : "—";
@@ -24,10 +25,10 @@ export default function HistoricalReplay({ marketData, market }) {
   return <details className="border-t border-slate-800 mt-3 pt-3 text-sm">
     <summary className="cursor-pointer text-cyan-300">Se mer – historiskt prisprov</summary>
     <div className="mt-3 space-y-3 text-slate-300">
-      <p>Prova pullback eller breakout på de dagskurser som redan hämtats. Inga nya API-anrop görs. Detta är ett tekniskt experiment utan historiska nyheter, AI eller referensfilter.</p>
+      <p>Prova ett av swinguppläggen på de dagskurser som redan hämtats. Inga nya API-anrop görs. Detta är ett tekniskt experiment utan historiska nyheter, AI eller referensfilter.</p>
       <p className="text-xs text-amber-300">Det korta urvalet på upp till 100 dagsljus kan ge få eller inga simuleringar. Resultatet bevisar ingen edge och är inte botens uppmätta träffsäkerhet.</p>
       <form onSubmit={simulate} className="grid gap-3 sm:grid-cols-2">
-        <label>Regel<select className={`${CONTROL} block w-full mt-1`} value={setup} onChange={(event) => change(setSetup, event.target.value)}><option value="PULLBACK">Pullback</option><option value="BREAKOUT">Breakout</option></select></label>
+        <label>Regel<select className={`${CONTROL} block w-full mt-1`} value={setup} onChange={(event) => change(setSetup, event.target.value)}>{SWING_SETUP_IDS.map((id) => <option key={id} value={id}>{id.replaceAll("_", " ")}</option>)}</select></label>
         <label>Max observerade sessioner<select className={`${CONTROL} block w-full mt-1`} value={holding} onChange={(event) => change(setHolding, event.target.value)}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>Fast antal simulerade aktier<input className={`${CONTROL} block w-full mt-1`} type="number" min="1" step="1" required value={quantity} onChange={(event) => change(setQuantity, event.target.value)} /></label>
         <label>Avgift per order ({marketData?.currency || "valuta"})<input className={`${CONTROL} block w-full mt-1`} type="number" min="0" step="any" required value={fee} onChange={(event) => change(setFee, event.target.value)} /></label>

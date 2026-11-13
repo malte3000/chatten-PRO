@@ -2,6 +2,7 @@ import { isAuthenticated } from "./_auth.js";
 import { getMarketStatus } from "./_market-hours.js";
 import { validateMarketBars } from "./_market-data-validation.js";
 import { isTimeoutError, providerErrorMessage, readProviderJson } from "./_provider-response.js";
+import { isSupportedCommonStock } from "./_instrument.js";
 
 const DAILY_MARKETS = { "America/New_York": "usa", "Europe/Stockholm": "stockholm" };
 const ALLOWED_INTERVALS = new Set([
@@ -48,7 +49,12 @@ export default async function handler(req, res) {
 
     const interval = String(req.query.interval || "1min");
     const exchange = String(req.query.exchange || "").trim();
+    const verifyStock = req.query.verify_stock === "1";
+    const market = String(req.query.market || "");
     if (exchange && !/^[A-Za-z0-9._ -]{1,60}$/.test(exchange)) return res.status(400).json({ error: "Ogiltig börs" });
+    if (verifyStock && (interval !== "1day" || !["usa", "stockholm"].includes(market))) {
+      return res.status(400).json({ error: "Aktieverifiering kräver dagsdata och en stödd marknad." });
+    }
 
     const requestedOutputSize = Number.parseInt(
       req.query.outputsize || "100",
@@ -75,6 +81,30 @@ export default async function handler(req, res) {
       return res.status(400).json({
         error: "Ogiltigt intervall",
       });
+    }
+
+    // A time-series symbol alone does not prove that the instrument is a common
+    // stock. Verify the provider's reference catalog before issuing a swing signal.
+    let eligibleStocks = null;
+    if (verifyStock) {
+      const stockParams = new URLSearchParams({
+        symbol: ticker, country: market === "usa" ? "United States" : "Sweden",
+        type: "Common Stock", format: "JSON", apikey: apiKey,
+      });
+      const stockResponse = await fetch(`https://api.twelvedata.com/stocks?${stockParams}`, { signal: AbortSignal.timeout(15000) });
+      const stocks = await readProviderJson(stockResponse);
+      if (stockResponse.status === 429 || Number(stocks?.code) === 429) {
+        return res.status(429).json({ error: "Market data quota reached", message: "Datakällans kvot är nådd. Försök igen senare." });
+      }
+      if (!stockResponse.ok || !stocks || stocks.status === "error" || !Array.isArray(stocks.data)) {
+        return res.status(502).json({ error: "Stock reference data unavailable", message: providerErrorMessage(stocks, "Aktietyp kunde inte verifieras hos datakällan.") });
+      }
+      eligibleStocks = stocks.data.filter((item) =>
+        String(item.symbol || "").toUpperCase() === ticker && isSupportedCommonStock(item, market) &&
+        (!exchange || String(item.exchange).toUpperCase() === exchange.toUpperCase()));
+      if (!eligibleStocks.length) {
+        return res.status(422).json({ error: "Unsupported instrument", message: "Ingen verifierad stamaktie med rätt ticker, börs och valuta hittades på vald marknad." });
+      }
     }
 
     const params = new URLSearchParams({
@@ -114,6 +144,12 @@ export default async function handler(req, res) {
     if (String(data.meta?.symbol || "").toUpperCase() !== ticker ||
         (exchange && String(data.meta?.exchange || "").toUpperCase() !== exchange.toUpperCase())) {
       return res.status(502).json({ error: "Prisdata matchar inte vald aktie och börs." });
+    }
+    const verifiedInstrument = eligibleStocks?.find((item) =>
+      String(item.exchange).toUpperCase() === String(data.meta?.exchange || "").toUpperCase() &&
+      String(item.currency).toUpperCase() === String(data.meta?.currency || "").toUpperCase());
+    if (verifyStock && !verifiedInstrument) {
+      return res.status(422).json({ error: "Instrument identity mismatch", message: "Kursdatan matchar inte en verifierad stamaktie på vald börs." });
     }
 
     const returnedBars = data.values
@@ -156,6 +192,11 @@ export default async function handler(req, res) {
       timestamp_timezone: interval === "1day" ? data.meta?.exchange_timezone || null : "UTC",
       timestamp_kind: interval === "1day" ? "exchange_session_date" : "utc_instant",
       excluded_current_session: excludedCurrentSession,
+      verified_instrument: verifiedInstrument ? {
+        symbol: ticker, name: String(verifiedInstrument.name || ticker),
+        exchange: String(verifiedInstrument.exchange), type: "Common Stock",
+        country: String(verifiedInstrument.country), currency: String(verifiedInstrument.currency),
+      } : null,
       fetched_at: new Date().toISOString(),
       validation,
       price: latest?.close ?? null,

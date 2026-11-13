@@ -1,12 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { runSwingReplay } from "../src/backtestModel.js";
+import { SWING_SETUP_IDS } from "../src/strategyModel.js";
 
 const HELP = `Offlineprisprov av experimentella swingregler – endast simulering.
 Inga nätverksanrop, API-anrop, databasändringar eller verkliga order görs.
 
 Användning:
   node scripts/backtest.js --input <data.json> --output <rapport.json>
-    --market usa|stockholm --setup BREAKOUT|PULLBACK --holding 1..5
+    --market usa|stockholm --setup ${SWING_SETUP_IDS.join("|")} --holding 1..5
     --quantity <helt aktieantal> --fee <avgift per order>
     --slippage-bps <baspunkter per fill> --as-of <ISO-klocka med tidszon>
     [--benchmark <referensdata.json> --benchmark-ticker <ticker>]
@@ -52,7 +53,7 @@ function parseArguments(args) {
   const missing = REQUIRED.filter((flag) => !options.has(flag));
   if (missing.length) throw new Error(`Obligatoriska parametrar saknas: ${missing.join(", ")}.`);
   if (!["usa", "stockholm"].includes(options.get("--market"))) throw new Error("--market ska vara usa eller stockholm.");
-  if (!["BREAKOUT", "PULLBACK"].includes(options.get("--setup"))) throw new Error("--setup ska vara BREAKOUT eller PULLBACK.");
+  if (!SWING_SETUP_IDS.includes(options.get("--setup"))) throw new Error(`--setup ska vara ett av ${SWING_SETUP_IDS.join(", ")}.`);
   if (options.has("--benchmark") !== options.has("--benchmark-ticker")) throw new Error("--benchmark och --benchmark-ticker ska anges tillsammans.");
 
   const integer = (flag, minimum, maximum = Number.MAX_SAFE_INTEGER) => {
