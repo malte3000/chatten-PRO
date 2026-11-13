@@ -4,7 +4,7 @@ import { fetchJson } from "./apiClient.js";
 import { appendSignalLog, signalFromScanItem } from "./signalLog.js";
 import { swingSignalValidity } from "./signalValidity.js";
 
-const LABELS = { TRADE: "TRADE · EXPERIMENTELL", WAIT: "TEKNISK FÖRFILTERTRÄFF", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT · KURSDATA EJ VERIFIERAD" };
+const LABELS = { TRADE: "TRADE · EXPERIMENTELL", WAIT: "TEKNISK FÖRFILTERTRÄFF", NO_TRADE: "NO TRADE", NOT_ASSESSED: "EJ BEDÖMT" };
 const SETUP_LABELS = { PULLBACK: "rekyl mot EMA20", BREAKOUT: "20-dagarsutbrott", RANGE_BREAKOUT: "kort konsolideringsutbrott", REBOUND: "återhämtning i upptrend" };
 
 async function api(url, body, signal) {
@@ -251,7 +251,7 @@ export default function MarketScanner({ market, horizon, now = Date.now(), onAna
     {report && <>
       <h2 className="font-semibold">{report.checked}/{report.target} kontrollerade · {report.universeSize} i datakällans aktielista</h2>
       {!busy && <button type="button" className="border border-cyan-800 rounded px-3 py-2 text-sm text-cyan-300" onClick={exportReport}>Exportera skanningsrapport (JSON)</button>}
-      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} {horizon === "day" ? "tekniska förfilterträffar (inte TRADE-signaler)" : "aktuella experimentella TRADE-signaler"} · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda (kursdata ej verifierad){expired.length ? ` · ${expired.length} tidigare TRADE-signaler är inte längre aktuella` : ""}.</p>
+      <p className="text-xs text-slate-400">{busy ? "Pågående skanning" : report.complete ? "Urvalet färdigskannat" : "Ofullständig skanning"} · {candidates.length} {horizon === "day" ? "tekniska förfilterträffar (inte TRADE-signaler)" : "aktuella experimentella TRADE-signaler"} · {rejected.length > 0 ? `${rejected.length} NO TRADE` : "0 tekniskt bortvalda"} · {unavailable.length} ej bedömda{expired.length ? ` · ${expired.length} tidigare TRADE-signaler är inte längre aktuella` : ""}.</p>
       {expired.length > 0 && <p role="status" className="text-sm text-amber-300">{expired.length} tidigare TRADE-signaler har löpt ut eller saknar verifierbart sessionsdatum: {expired.map(({ item }) => item.symbol).join(", ")}. Gör en ny skanning innan du överväger en order.</p>}
       {horizon === "day" && candidates.length > 0 && <p className="text-xs text-amber-300">Daytradeskannern är ett tekniskt förfilter. Samlad analys kan ännu inte bedöma en TRADE-signal för daytrading.</p>}
       {!busy && report.checked > 0 && !candidates.length && <p className="text-sm">{rejected.length === 0

@@ -160,7 +160,7 @@ export default function TradingViewPaperLedger({ observations }) {
     {state.error && <p role="alert" className="text-red-300">{state.error}</p>}
     {error && <p role="alert" className="text-red-300">{error}</p>}
     {notice && <p role="status" className="text-cyan-300">{notice}</p>}
-    {eligible.length === 0 && orders.length === 0 && <p className="text-slate-400">Lås först en teknisk AVVAKTA-kandidat i paperloggen.</p>}
+    {eligible.length === 0 && orders.length === 0 && <p className="text-slate-400">Lås först en teknisk TRADE-signal i paperloggen.</p>}
     {visibleObservations.map((observation) => {
       const order = byObservationId.get(observation.id);
       return <div key={observation.id} className="border border-slate-800 rounded p-3">

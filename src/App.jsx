@@ -364,7 +364,7 @@ export default function App() {
         {result.strategy && <SwingDataCheck result={result} signalValidity={resultSignalValidity} />}
         {result.strategy && <div className="border border-slate-800 rounded p-3 mt-3" aria-label="Experimentell swingbedömning">
           <div className="flex justify-between gap-3"><h3 className="font-semibold">Swingupplägg · experimentellt</h3><span className={expiredResultSignal ? "text-amber-300" : "text-cyan-300"}>{expiredResultSignal ? "HISTORISKT UPPLÄGG" : result.strategy.status === "WATCH" ? "UPPLÄGG HITTAT" : result.strategy.status === "NO_SETUP" ? "INGET UPPLÄGG" : "EJ BEDÖMT"}</span></div>
-          <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.map((setup) => SETUP_LABELS[setup] || setup).join(" + ") : "ingen regel uppfylld"}</p>
+          <p className="text-xs text-slate-400 mt-1">{result.strategy.version} · {result.strategy.setups.length ? result.strategy.setups.map((setup) => SETUP_LABELS[setup] || setup).join(" + ") : result.strategy.status === "NO_SETUP" ? "ingen regel uppfylld" : "reglerna kunde inte bedömas"}</p>
           {result.strategy.metrics?.latest_closed_candle && <p className="text-xs text-slate-400 mt-1">Bedömd stängd dagskurs: {result.strategy.metrics.latest_closed_candle}{result.marketData?.excluded_current_session ? " · dagens ofärdiga kurs uteslöts" : ""}.</p>}
           <ul className="text-sm mt-2 list-disc pl-5">{result.strategy.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           {!expiredResultSignal && result.strategy.plans.map((plan) => <RiskCalculator key={`${result.record.trade_id}-${plan.setup}`} plan={plan} currency={result.marketData?.currency} />)}

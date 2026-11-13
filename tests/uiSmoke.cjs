@@ -30,6 +30,21 @@ function createMockApi() {
     }
     return bars;
   }
+  function scanCandidate(symbol, name, rank, isDay) {
+    const bars = dailyBars();
+    const plan = { setup: "PULLBACK", entry_reference: 149, stop: 139, target: 169, risk_per_share: 10, theoretical_risk_reward: 2 };
+    return {
+      symbol, name, exchange: "NASDAQ", currency: "USD", status: isDay ? "WAIT" : "TRADE",
+      rank_score: rank, metrics: { rvol: rank / 2, atr: 2, price: 149, latest_datetime: "2026-09-28" },
+      screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" },
+      swing_strategy_version: isDay ? null : "swing-v0.5-experimental",
+      screening_setups: isDay ? [] : ["PULLBACK"], screening_plans: isDay ? [] : [plan],
+      primary_setup: isDay ? null : "PULLBACK", signal_plan: isDay ? null : plan,
+      decision: isDay ? null : { version: "readiness-v0.6", status: "TRADE" },
+      data_snapshot: isDay ? null : { fetched_at: "2026-09-28T21:00:00.000Z", bars },
+      reasons: ["Experimental trend filters passed"],
+    };
+  }
   function handleApi({ pathname, method = "GET", body: input = {}, searchParams = new URLSearchParams() }) {
     if (pathname === "/api/session") return { status: 200, body: { authenticated: true } };
     if (pathname === "/api/scan" && input.market === "stockholm") return { status: 200, body: {
@@ -40,13 +55,12 @@ function createMockApi() {
     } };
     if (pathname === "/api/scan") {
       const isDay = input.horizon === "day";
-      const candidateStatus = isDay ? "WAIT" : "TRADE";
       return { status: 200, body: {
       results: [
-        { symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 4, metrics: { rvol: 2, atr: 2 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, screening_setups: isDay ? [] : ["PULLBACK"], primary_setup: isDay ? null : "PULLBACK", signal_plan: isDay ? null : { setup: "PULLBACK", entry_reference: 149, stop: 139, target: 169 }, reasons: ["Experimental trend filters passed"] },
-        { symbol: "MOCKA", name: "Mock A", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 3, metrics: { rvol: 1.5 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
-        { symbol: "MOCKB", name: "Mock B", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 2, metrics: { rvol: 1.4 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
-        { symbol: "MOCKC", name: "Mock C", exchange: "NASDAQ", currency: "USD", status: candidateStatus, rank_score: 1, metrics: { rvol: 1.3 }, screening_selection: isDay ? null : { latest_closed_datetime: "2026-09-28" }, reasons: ["Technical filters passed"] },
+        scanCandidate("NVDA", "NVIDIA", 4, isDay),
+        scanCandidate("MOCKA", "Mock A", 3, isDay),
+        scanCandidate("MOCKB", "Mock B", 2, isDay),
+        scanCandidate("MOCKC", "Mock C", 1, isDay),
         { symbol: "BAD", name: "Rejected", exchange: "NYSE", status: "NO_TRADE", rank_score: 0, reasons: ["Missing reliable volume"] },
       ], next_offset: 5, total: 5, universe_size: 1000, done: true, wait_ms: 0,
     } };
@@ -153,7 +167,7 @@ async function runSmoke() {
     assert.equal(saved[0].signal_inputs.scan_status, "NOT_ASSESSED");
     assert.deepEqual(saved[0].signal_inputs.results.map((item) => item.status), ["NOT_ASSESSED", "NOT_ASSESSED"]);
     await swedishScanner.getByText("Se mer – alla 2 instrument och bedömningar").click();
-    await swedishScanner.getByText("TESTA · OMX · EJ BEDÖMT · KURSDATA EJ VERIFIERAD").waitFor();
+    await swedishScanner.getByText("TESTA · OMX · EJ BEDÖMT").waitFor();
     await page.getByLabel("Marknad (välj aktiens börs)").selectOption("usa");
     const scanner = page.getByRole("region", { name: "Marknadsskanner" });
     await scanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
@@ -165,6 +179,8 @@ async function runSmoke() {
     assert.deepEqual(saved[0].signal_inputs.results.filter((item) => item.status === "TRADE").map((item) => item.symbol), ["NVDA", "MOCKA", "MOCKB", "MOCKC"]);
     assert.deepEqual(newsRequests, [], "Scanning must not request or require news for technical signals");
     await scanner.getByText("4 aktuella experimentella TRADE-signaler", { exact: false }).waitFor();
+    const signalJournal = page.getByRole("region", { name: "TRADE-signallogg" });
+    await signalJournal.getByText("4 registrerade signaler", { exact: false }).waitFor();
     const [scanDownload] = await Promise.all([
       page.waitForEvent("download"),
       scanner.getByRole("button", { name: "Exportera skanningsrapport (JSON)" }).click(),
@@ -199,6 +215,7 @@ async function runSmoke() {
     await page.getByText("Analysen och beslutet är sparade i journalen.", { exact: false }).waitFor();
     assert.equal(saved.length, savedBeforeManual + 1);
     assert.equal(saved[0].signal_inputs.decision.status, "TRADE");
+    await signalJournal.getByText("4 registrerade signaler", { exact: false }).waitFor();
     assert.equal(saved[0].winner, null);
     const result = page.getByRole("region", { name: "Samlad analys" });
     await result.getByText("UPPLÄGG HITTAT", { exact: true }).waitFor();
