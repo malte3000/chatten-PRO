@@ -4,6 +4,7 @@ tests/preview-*.png
 /artifacts/access-check/
 /NIGHT_WORK_STATUS.md
 dist/
+supabase/.temp/
 .env
 .env.*
 !.env.example

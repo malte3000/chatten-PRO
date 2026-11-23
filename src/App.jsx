@@ -7,6 +7,7 @@ import { swingSignalValidity } from "./signalValidity.js";
 import MarketScanner from "./MarketScanner.jsx";
 import PerformanceSummary from "./PerformanceSummary.jsx";
 import HistoricalReplay from "./HistoricalReplay.jsx";
+import StatisticalAnalysis from "./StatisticalAnalysis.jsx";
 import PaperJournal from "./PaperJournal.jsx";
 import NewsEvidence from "./NewsEvidence.jsx";
 import SignalJournal from "./SignalJournal.jsx";
@@ -372,6 +373,7 @@ export default function App() {
           {result.strategy.status === "WATCH" && resultStatus !== "TRADE" && !expiredResultSignal && <p className="text-sm text-amber-300 mt-2">Ett mönster hittades men slutbedömningen godkände ingen signal. Se orsaken ovan.</p>}
           <p className="text-xs text-amber-300 mt-2">Reglerna är experimentella och deras träffsäkerhet är inte uppmätt. Stop och positionskalkyl begränsar planerad risk men skyddar inte mot gap och slippage.</p>
           <HistoricalReplay key={result.record.trade_id} marketData={result.marketData} market={market} />
+          <StatisticalAnalysis key={`${result.record.trade_id}-statistics`} marketData={result.marketData} market={result.market} ticker={result.ticker} />
         </div>}
         {result.news && <p className="text-sm mt-3 text-slate-400">{result.news.summary || result.news.reasoning?.slice(0, 220) || "Nyhetsanalysen saknar sammanfattning."}</p>}
         {result.newsError && <p role="status" className="text-sm mt-3 text-amber-300">Valfria nyheter kunde inte hämtas: {result.newsError}. Det tekniska beslutet påverkas inte.</p>}

@@ -2,7 +2,7 @@
 
 ## Projekt: Sannolikhetsterminal / Signal Bot
 
-### Aktuell inriktning (grundbeslut 2026-09-16, kodstatus 2026-11-13)
+### Aktuell inriktning (grundbeslut 2026-09-16, kodstatus 2026-11-23)
 
 - Swingtrading (1–5 handelsdagar) är huvudläge; daytrading är sekundärt.
 - Samlad swinganalys kan ge en experimentell teknisk TRADE-signal eller NO TRADE.
@@ -39,6 +39,21 @@ slutbedömning. Daytrade är fortfarande ett tekniskt förfilter utan egen
 TRADE-strategi. Databrister märks EJ BEDÖMT. Nyheter hämtas bara separat på
 begäran och styr inte signaler. SCAN-rapporter hålls isär från faktiska trades.
 Global API-kvot, bredare urval, produktspecifik data och validering återstår.
+
+`pattern-discovery-v0.1` är en första separat forskningsmotor. Den identifierar
+endagsfall och första passering av drawdowntrösklar från 30/90-sessioners
+tidigare topp, deduplicerar sammanhängande nedgångar och mäter utfall efter
+1/5/10/20/60 sessioner. Recovery/Continuation-frekvenser har stickprovsstorlek
+och Wilson-intervall; små urval visas som otillräckliga. `event-backtest-v0.1`
+prövar dessa händelser med nästa öppning, mål, stop, tidsutgång och explicita
+kostnader. Samma dags okända mål-/stopordning blir TIE som standard. Motorerna
+är deterministiska och framtida bars används endast till senare utfall.
+Pattern Explorer visar den lokala analysen men påverkar ännu inte TRADE/NO TRADE.
+En separat första kalibreringsmodul beräknar Brier score, log loss, reliability-
+grupper och expected calibration error för redan avgjorda prognoser; den ändrar
+aldrig modellstatus automatiskt.
+Oberoende validering, point-in-time-universum, justerad data och större
+fleraktieunderlag krävs före signalintegration eller påståenden om edge.
 
 Varje verifierad TRADE från skanner eller enskild analys sparas även i en
 separat, lokal signallogg med signaldatum, strategiversion och låsta planer.

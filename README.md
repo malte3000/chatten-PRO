@@ -176,6 +176,65 @@ finns är profit factor inte beräknad. Underlaget är högst de 100 senast häm
 posterna, inte hela livstidshistoriken. Netto / summerat ingångsvärde är inte
 kontots avkastning, och vinstandelen är inte en prognos.
 
+## Pattern Discovery och sannolikhetsanalys (första version)
+
+Swinganalysens detaljvy innehåller en lokal **Pattern Explorer** för redan
+hämtade dagskurser. Den skiljer endagsfall från första passeringen av en
+drawdowntröskel från högsta tidigare stängning under 30 eller 90 sessioner.
+Tillgängliga trösklar är 1–30 procent samt 35, 40 och 50 procent. Utfall mäts
+efter 1, 5, 10, 20 eller 60 observerade sessioner.
+
+`pattern-discovery-v0.1` redovisar antal händelser, observationsperiod,
+terminalavkastning, medel/median, maximal gynnsam och negativ rörelse, full
+återhämtning samt Recovery och Continuation Probability. Binära frekvenser får
+Wilson-intervall. Samma sammanhängande drawdown registreras inte på varje
+efterföljande dag, och utfallsdata börjar först efter händelsens stängning.
+Överlappande utfallsperioder redovisas uttryckligen som statistiskt beroende.
+Gränssnittet döljer sannolikheten när färre än 20 jämförbara utfall finns.
+
+Den inbyggda vyn analyserar bara den korta serie som den vanliga analysen redan
+hämtat. Den är därför främst en transparent funktionskontroll och kommer ofta
+att visa **otillräckligt underlag**. Den ändrar inte BUY/TRADE eller NO TRADE:
+historiska frekvenser får inte bli ett signalfilter förrän en större,
+point-in-time-korrekt datamängd har validerats oberoende.
+
+För större sparade dataset finns ett reproducerbart offlineflöde:
+
+```sh
+pnpm run pattern-analysis -- --input datasets.json --output pattern-report.json --window 30 --threshold 10 --horizon 20 --recovery-target 5 --continuation-target 3 --quantity 1 --fee 1 --slippage-bps 10 --spread-bps 5
+```
+
+Input är en JSON-lista med dataserier, eller `{ "datasets": [...] }`. Varje
+serie har `ticker` och stigande dagsbars med `datetime`, OHLC och valfri volym.
+CLI:t kombinerar Pattern Discovery med `event-backtest-v0.1`: ingång vid nästa
+öppning, mål/stop, tidsutgång, gap, spread, slippage och båda orderavgifterna.
+Om mål och stop träffas i samma dagsljus blir utfallet `TIE` som standard; välj
+`--ambiguous STOP_FIRST` för en uttryckligen konservativ regel. Rapportfilen får
+inte finnas sedan tidigare och skrivs aldrig över.
+
+Backtestet redovisar bland annat utfallsfrekvenser med Wilson-intervall,
+genomsnittlig vinst/förlust, expectancy, profit factor, Sharpe/Sortino per
+observation, realiserad drawdown, periodstabilitet och beroende mellan
+överlappande händelser. Det är fortfarande deskriptiv forskning, inte bevisad
+prediktiv förmåga. Leverantörens split-/utdelningsjustering, avnoterade bolag,
+historiskt aktieuniversum och licensvillkor måste verifieras innan större
+slutsatser dras.
+
+Transparenta indikatorfunktioner för SMA, Wilder RSI, MACD, Wilder ATR och
+realiserad volatilitet finns som grund för senare kombinationstester. De används
+ännu inte för att höja signalens confidence.
+
+`probability-calibration-v0.1` kan utvärdera redan avgjorda prognoser med Brier
+score, log loss, expected calibration error och reliability-grupper med
+Wilson-intervall. Den tränar eller befordrar aldrig en modell automatiskt och
+kräver att anroparen väljer ett kronologiskt oberoende utvärderingsurval.
+
+Den additiva Supabase-migrationen i `supabase/migrations` beskriver separat,
+server-only lagring för dataset, dagsbars, forskningskörningar, händelser,
+resultat, modellversioner och uppföljda prognoser. Den ändrar inte befintliga
+journal- eller papertabeller, ger ingen browserroll åtkomst och är inte
+automatiskt applicerad på någon live-databas.
+
 ## Historiskt prisprov (experimentellt)
 
 Swinganalysens **Se mer – historiskt prisprov** kör ett av de fyra aktuella
