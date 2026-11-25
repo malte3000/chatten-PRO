@@ -5,17 +5,27 @@ import { isSupportedCommonStock } from "./_instrument.js";
 
 const universeCache = new Map();
 const MAX_RUN = 100;
+const BATCH_INTERVAL_MS = 61000;
 let nextBatchAt = 0;
 export class ScanError extends Error {
   constructor(message, status = 502, retryAfterMs = 0) { super(message); this.status = status; this.retryAfterMs = retryAfterMs; }
 }
 
-async function provider(url) {
+async function provider(url, timeoutMs) {
+  const signal = AbortSignal.timeout(timeoutMs);
   let response;
-  try { response = await fetch(url, { signal: AbortSignal.timeout(12000) }); }
-  catch (error) { throw new ScanError(isTimeoutError(error) ? "Tidsgränsen för marknadsdata överskreds." : "Marknadsdatakällan svarade inte.", isTimeoutError(error) ? 504 : 502); }
-  const data = await readProviderJson(response);
-  if (response.status === 429 || Number(data?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Försök igen senare.", 429, 61000);
+  let data;
+  try {
+    response = await fetch(url, { signal });
+    if (response.status !== 429) data = await readProviderJson(response);
+  } catch (error) {
+    if (signal.aborted || isTimeoutError(error)) {
+      // A timed-out batch may already have used credits at the provider.
+      throw new ScanError("Tidsgränsen för marknadsdata överskreds.", 504, BATCH_INTERVAL_MS);
+    }
+    throw new ScanError("Marknadsdatakällan svarade inte.");
+  }
+  if (response.status === 429 || Number(data?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Försök igen senare.", 429, BATCH_INTERVAL_MS);
   if (!response.ok || !data || data?.status === "error") throw new ScanError(providerErrorMessage(data, "Datakällan returnerade ett ogiltigt svar. Kontrollera täckning och abonnemang."));
   return data;
 }
@@ -32,7 +42,7 @@ export async function getUniverse(market, now = Date.now()) {
   const country = market === "usa" ? "United States" : "Sweden";
   const currency = market === "usa" ? "USD" : "SEK";
   const params = new URLSearchParams({ country, type: "Common Stock", format: "JSON" });
-  const data = await provider(`https://api.twelvedata.com/stocks?${params}`);
+  const data = await provider(`https://api.twelvedata.com/stocks?${params}`, 12000);
   if (!Array.isArray(data.data)) throw new ScanError("Aktielistan har ett ogiltigt format.");
   const seen = new Set();
   const items = data.data.filter((item) => {
@@ -58,12 +68,12 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
   const selection = ordered.slice(offset, Math.min(offset + batchSize, total));
   if (!selection.length) return { results: [], next_offset: total, done: true, total, universe_size: universe.length, wait_ms: 0 };
   // Best-effort warm-instance throttle, plus client pacing. Not a distributed quota.
-  nextBatchAt = now + 61000;
+  nextBatchAt = now + BATCH_INTERVAL_MS;
   const params = new URLSearchParams({ symbol: selection.map((item) => `${item.symbol}:${item.exchange}`).join(","), interval: horizon === "week" ? "1day" : "15min", outputsize: "100", timezone: "UTC", apikey: apiKey, format: "JSON" });
-  const data = await provider(`https://api.twelvedata.com/time_series?${params}`);
+  const data = await provider(`https://api.twelvedata.com/time_series?${params}`, 20000);
   const results = selection.map((instrument) => {
     const raw = selection.length === 1 && data.values ? data : data[`${instrument.symbol}:${instrument.exchange}`] || data[instrument.symbol];
-    if (Number(raw?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Skanningen är inte komplett.", 429, 61000);
+    if (Number(raw?.code) === 429) throw new ScanError("Datakällans kvot är nådd. Skanningen är inte komplett.", 429, BATCH_INTERVAL_MS);
     if (!raw || raw.status === "error" || !Array.isArray(raw.values) || raw.meta?.symbol?.toUpperCase() !== instrument.symbol || raw.meta?.exchange?.toUpperCase() !== instrument.exchange.toUpperCase() || raw.meta?.currency !== instrument.currency) {
       const data_issue = !raw ? "MISSING_SERIES" : raw.status === "error" ? "PROVIDER_REJECTED" : !Array.isArray(raw.values) ? "INVALID_SERIES" : "IDENTITY_MISMATCH";
       return { ...instrument, status: "NOT_ASSESSED", rank_score: 0, metrics: null, data_issue, reasons: ["Kursdata för rätt aktie och börs kunde inte verifieras. Strategin har inte bedömts."] };
@@ -92,5 +102,5 @@ export async function scanBatch({ market, horizon, offset, limit, seed }, now = 
     throw new ScanError("Stockholmsbörsens kursdata kunde inte verifieras hos datakällan. Skanningen avbröts utan tradebedömning. Kontrollera datatäckning och abonnemang.");
   }
   const nextOffset = offset + selection.length;
-  return { results: rankCandidates(results), next_offset: nextOffset, done: nextOffset >= total, total, universe_size: universe.length, wait_ms: nextOffset >= total ? 0 : 61000, fetched_at: new Date(now).toISOString() };
+  return { results: rankCandidates(results), next_offset: nextOffset, done: nextOffset >= total, total, universe_size: universe.length, wait_ms: nextOffset >= total ? 0 : BATCH_INTERVAL_MS, fetched_at: new Date(now).toISOString() };
 }

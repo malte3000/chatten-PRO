@@ -147,21 +147,26 @@ export default function MarketScanner({ market, horizon, now = Date.now(), onAna
     let complete = false;
     let scanError = "";
     try {
-      let quotaRetries = 0;
+      let batchRetries = 0;
       while (!complete) {
         setProgress(`Kontrollerar aktier · ${offset}/${target}…`);
         let batch;
         try { batch = await api("/api/scan", { market, horizon, limit, offset, seed }, abort.signal); }
         catch (problem) {
-          if (problem.status === 429 && problem.retryMs && quotaRetries < 2) {
-            quotaRetries++;
-            setProgress(`Databudgeten är upptagen. Väntar ${Math.ceil(problem.retryMs / 1000)} sekunder · ${offset}/${target}.`);
-            await pause(Math.min(problem.retryMs, 120000), abort.signal); continue;
+          const timedOut = problem.status === 504;
+          const canRetry = timedOut || problem.status === 429;
+          if (canRetry && problem.retryMs > 0 && batchRetries < 2) {
+            batchRetries++;
+            const delay = Math.min(problem.retryMs, 120000);
+            const reason = timedOut ? "Marknadsdata tog för lång tid." : "Databudgeten är upptagen.";
+            setProgress(`${reason} Försöker igen om ${Math.ceil(delay / 1000)} sekunder · ${offset}/${target}.`);
+            await pause(delay, abort.signal);
+            continue;
           }
           throw problem;
         }
         if (!Array.isArray(batch.results) || !Number.isInteger(batch.next_offset) || batch.next_offset <= offset || batch.next_offset > limit) throw new Error("Skannerns svar är ogiltigt.");
-        quotaRetries = 0;
+        batchRetries = 0;
         offset = batch.next_offset; target = batch.total; universeSize = batch.universe_size;
         results = rankCandidates([...results, ...batch.results]);
         complete = batch.done === true;

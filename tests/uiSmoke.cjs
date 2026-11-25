@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 function createMockApi() {
   const saved = [];
   const newsRequests = [];
+  const swingScanOffsets = [];
   let marketStatusFails = false;
   let paperPhase = null;
   function dailyBars() {
@@ -55,15 +56,25 @@ function createMockApi() {
     } };
     if (pathname === "/api/scan") {
       const isDay = input.horizon === "day";
-      return { status: 200, body: {
-      results: [
+      const results = [
         scanCandidate("NVDA", "NVIDIA", 4, isDay),
         scanCandidate("MOCKA", "Mock A", 3, isDay),
         scanCandidate("MOCKB", "Mock B", 2, isDay),
         scanCandidate("MOCKC", "Mock C", 1, isDay),
         { symbol: "BAD", name: "Rejected", exchange: "NYSE", status: "NO_TRADE", rank_score: 0, reasons: ["Missing reliable volume"] },
-      ], next_offset: 5, total: 5, universe_size: 1000, done: true, wait_ms: 0,
-    } };
+      ];
+      if (!isDay) {
+        swingScanOffsets.push(input.offset);
+        if (input.offset === 0) return { status: 200, body: {
+          results: results.slice(0, 4), next_offset: 4, total: 5, universe_size: 1000, done: false, wait_ms: 0,
+        } };
+        if (swingScanOffsets.length === 2) return { status: 504, body: {
+          error: "Tidsgränsen för marknadsdata överskreds.", retry_after_ms: 61000,
+        } };
+      }
+      return { status: 200, body: {
+        results: results.slice(input.offset), next_offset: 5, total: 5, universe_size: 1000, done: true, wait_ms: 0,
+      } };
     }
     if (pathname === "/api/market-data") {
       const ticker = searchParams.get("ticker");
@@ -131,7 +142,7 @@ function createMockApi() {
     }
     return { status: 404, body: { error: "Ingen mock finns för denna API-route." } };
   }
-  return { saved, newsRequests, handleApi, setMarketStatusFailure: (value) => { marketStatusFails = value; }, setPaperPhase: (value) => { paperPhase = value; } };
+  return { saved, newsRequests, swingScanOffsets, handleApi, setMarketStatusFailure: (value) => { marketStatusFails = value; }, setPaperPhase: (value) => { paperPhase = value; } };
 }
 
 async function runSmoke() {
@@ -171,7 +182,10 @@ async function runSmoke() {
     await page.getByLabel("Marknad (välj aktiens börs)").selectOption("usa");
     const scanner = page.getByRole("region", { name: "Marknadsskanner" });
     await scanner.getByRole("button", { name: "Skanna marknaden", exact: true }).click();
+    await scanner.getByText("Marknadsdata tog för lång tid. Försöker igen om 61 sekunder · 4/5.").waitFor();
+    await page.clock.fastForward(61000);
     await page.getByText("Skanningsrapporten är sparad i journalen, separat från faktiska trades.").waitFor();
+    assert.deepEqual(mock.swingScanOffsets, [0, 4, 4]);
     assert.equal(saved[0].signal_inputs.record_type, "SCAN");
     assert.equal(saved[0].signal_inputs.checked, 5);
     assert.equal(saved[0].strategy_version, "v0.7-experimental");

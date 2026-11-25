@@ -191,3 +191,35 @@ test("scanner skips unsupported currencies before fetching series and paginates 
   assert.deepEqual(seriesRequests[2], seriesRequests[0]);
   assert.equal(stockRequests, 1);
 });
+
+test("scanner reports retryable timeouts both before and after receiving response headers", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 2 * 86400000 });
+  const headers = setup(t, 10 * 60000);
+  const timeout = new DOMException("The request timed out", "TimeoutError");
+  let seriesRequests = 0;
+  globalThis.fetch = async (url) => {
+    if (new URL(url).pathname === "/stocks") return { ok: true, json: async () => ({ data: [
+      { symbol: "DEMO", exchange: "NASDAQ", country: "United States", currency: "USD", type: "Common Stock" },
+    ] }) };
+    seriesRequests++;
+    if (seriesRequests === 1) throw timeout;
+    if (seriesRequests === 2) return { ok: true, status: 200, json: async () => { throw timeout; } };
+    return { ok: false, status: 429 };
+  };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = response();
+    await handler({ method: "POST", headers, body }, res);
+    assert.equal(res.code, 504);
+    assert.match(res.data.error, /Tidsgränsen för marknadsdata/);
+    assert.equal(res.data.retry_after_ms, 61000);
+    assert.equal(res.headers["Retry-After"], "61");
+    t.mock.timers.tick(res.data.retry_after_ms);
+  }
+
+  const limited = response();
+  await handler({ method: "POST", headers, body }, limited);
+  assert.equal(limited.code, 429);
+  assert.match(limited.data.error, /kvot är nådd/);
+  assert.equal(seriesRequests, 3);
+});
